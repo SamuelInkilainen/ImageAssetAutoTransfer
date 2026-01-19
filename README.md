@@ -1,240 +1,209 @@
-# Folder Monitor Script - version 1.3
+# Image Asset Auto-Transfer
 
-A Python script that monitors a specified folder (including subfolders) for file changes and automatically copies modified files to a destination folder.
+A Python script that monitors specified folders (including subfolders) for file changes and automatically copies modified files to a destination folder. Perfect for game development workflows where assets need to be automatically synced between design tools and game project folders.
 
 ## Features
 
-- **Real-time Monitoring**: Watches for file changes in real-time
+- **Real-time Monitoring**: Watches for file changes in real-time using the watchdog library
 - **Recursive Monitoring**: Monitors all subfolders automatically
-- **Automatic Copying**: Copies modified or newly created files immediately
+- **Automatic Copying**: Copies modified or newly created files immediately to destination
 - **Folder Structure Preservation**: Maintains the same folder structure in the destination
-- **Easy Configuration**: Simple JSON configuration file for folder paths
+- **Multi-Source Support**: Monitor multiple source folders simultaneously
+- **File Filtering**: Ignore specific file extensions (supports multi-part extensions like `.bak.png`)
+- **PNG Compression**: Optional high-quality PNG compression using pngquant (90-100% quality)
+- **Image Resizing**: Parse resize percentage from filename (e.g., `50% image.png` resizes to 50%)
+- **Filename Path Parsing**: Extract subfolder paths from filenames using a delimiter (e.g., `folder§subfolder§file.png`)
 - **Cross-platform**: Works on Windows, macOS, and Linux
-- **PNG Compression**: Optional pngquant compression for PNG files
-- **Image Resizing**: Optional ImageMagick-based image resizing parsed from filename
-- **Filename Path Parsing**: Extract subfolder paths from filenames for organized output
-- **File Filtering**: Ignore specific file extensions (including multi-part extensions like `.bak.png`)
+- **Executable Version**: Can be built as a standalone executable (no Python required)
+
+## Requirements
+
+- Python 3.7 or higher
+- watchdog library (for file monitoring)
+
+### Optional Tools
+
+- **pngquant** - For PNG compression (download from [pngquant.org](https://pngquant.org/))
+- **ImageMagick** - For image resizing (download from [imagemagick.org](https://imagemagick.org/))
 
 ## Installation
 
-1. Install Python 3.7 or higher if not already installed
-2. Install required dependencies:
+### Standard Installation
 
+1. Clone this repository:
+```bash
+git clone <your-repository-url>
+cd ImageAssetAutoTransfer
+```
+
+2. Install Python dependencies:
 ```bash
 pip install -r requirements.txt
 ```
 
+3. (Optional) Install pngquant for PNG compression
+4. (Optional) Install ImageMagick for image resizing
+
+### Building as Executable
+
+If you want a standalone executable (no Python required):
+
+```bash
+python build_executable.py
+```
+
+The executable will be created in the `dist` folder. See [BUILD_INSTRUCTIONS.md](BUILD_INSTRUCTIONS.md) for details.
+
 ## Configuration
 
-Edit the `config.json` file to set your source and destination folders.
+Edit the `config.json` file to configure the script for your needs.
 
-### Single Source Folder (simple):
+### Basic Configuration (Single Source)
 
 ```json
 {
-  "source_folder": "C:\\Path\\To\\Source\\Folder",
+  "source_folders": ["C:\\Path\\To\\Your\\Source\\Folder"],
   "destination_folder": "C:\\Path\\To\\Destination\\Folder"
 }
 ```
 
-### Multiple Source Folders:
+### Full Configuration Example
 
 ```json
 {
   "source_folders": [
-    {
-      "label": "Project Assets",
-      "path": "C:\\Path\\To\\First\\Source"
-    },
-    {
-      "label": "Backup Files",
+    "C:\\Users\\You\\Projects\\GameAssets",
+    "C:\\Users\\You\\Projects\\ExtraAssets"
   ],
-  "destination_folder": "C:\\Path\\To\\Destination\\Folder",
-  "ignore_extensions": [".txt", ".tmp", ".log"],
-  "compress_png": true
-} "destination_folder": "C:\\Path\\To\\Destination\\Folder",
-  "ignore_extensions": [".txt", ".tmp", ".log"]
+  "destination_folder": "C:\\Users\\You\\GameProject\\Resources",
+  "ignore_extensions": [".txt", ".bak", ".bak.png"],
+  "compress_png": true,
+  "parse_filename_paths": true,
+  "filename_path_delimiter": "§",
+  "parse_resize_from_filename": true,
+  "pngquant_path": "C:\\Tools\\pngquant\\pngquant.exe",
+  "debug": false
 }
 ```
 
-You can also omit labels:
+### Configuration Options
 
-```json
-{
-  "source_folders": [
-    "C:\\Path\\To\\First\\Source",
-    "C:\\Path\\To\\Second\\Source"
-  ],
-  "destination_folder": "C:\\Path\\To\\Destination\\Folder"
-}
-```
-**Note**: You can use either single backslashes (`\`), double backslashes (`\\`), or forward slashes (`/`) in paths - Python will handle them all correctly.
-
-### Optional Configuration Fields
-
-- **`ignore_extensions`**: Array of file extensions to ignore (e.g., `["txt", ".tmp", ".log", ".bak.png"]`)
-- **`compress_png`**: Set to `true` to enable PNG compression using pngquant (default: `false`)
-- **`pngquant_path`**: Full path to pngquant executable (optional, defaults to `pngquant` in PATH)
-- **`parse_filename_paths`**: Set to `true` to parse subfolder paths from filenames (default: `false`)
-- **`filename_path_delimiter`**: Character used to separate path parts in filenames (default: `"§"`)
-- **`parse_resize_from_filename`**: Set to `true` to parse resize percentage from filenames (default: `false`)
-
-## PNG Compression
-
-The script uses a **TinyPNG-like multi-pass compression** approach for optimal file size and quality:
-
-**Pass 1: Lossy Compression (pngquant)**
-- Aggressive color quantization with quality range 60-85%
-- Posterization to reduce color precision
-- Metadata stripping for smaller files
-
-**Pass 2: Lossless Optimization (OptiPNG/AdvPNG)** 
-- Additional PNG structure optimization
-- Fallback to AdvPNG if OptiPNG not available
-
-This approach typically achieves **70-80% file size reduction** while preserving visual quality, comparable to TinyPNG.
-
-### Setup:
-
-1. **Install pngquant** (required):
-   - Download from [pngquant.org](https://pngquant.org/)
-   - Or install via package manager:
-     - Windows: `choco install pngquant`
-     - macOS: `brew install pngquant`
-     - Linux: `apt install pngquant`
-
-2. **Install OptiPNG** (recommended for best results):
-   - Download from [optipng.sourceforge.net](http://optipng.sourceforge.net/)
-   - Or install via package manager:
-     - Windows: `choco install optipng`
-     - macOS: `brew install optipng`
-     - Linux: `apt install optipng`
-
-3. **Configure in config.json**:
-   ```json
-   {
-     "compress_png": true,
-     "pngquant_path": "C:\\Program Files\\pngquant\\pngquant.exe",
-     "optipng_path": "C:\\Program Files\\OptiPNG\\optipng.exe"
-   }
-   ```
-
-   Or if both are in your system PATH:
-   ```json
-   {
-     "compress_png": true
-   }
-   ```
-
-The script uses quality 80-95 for compression. PNG files are copied first, then compressed in place at the destination.
-
-## Image Resizing with ImageMagick
-
-To enable automatic image resizing based on filename:
-
-1. Install ImageMagick:
-   - **Windows**: Download from [imagemagick.org](https://imagemagick.org/script/download.php)
-   - **macOS**: `brew install imagemagick`
-   - **Linux**: `sudo apt-get install imagemagick`
-
-2. Enable in your config:
-   ```json
-   {
-     "parse_resize_from_filename": true
-   }
-   ```
-
-3. Name your files with resize percentage at the start:
-   - `50% image1.png` → Resizes to 50% of original size
-   - `25% subfolder1#image2.png` → Resizes to 25% and saves to subfolder1/
-
-**Processing Order**: Copy → Resize (if enabled) → Compress (if enabled)
-
-## Filename Path Parsing
-
-Organize files into subfolders by encoding paths in filenames:
-
-1. Enable in your config:
-   ```json
-   {
-     "parse_filename_paths": true,
-     "filename_path_delimiter": "#"
-   }
-   ```
-
-2. Use the delimiter to specify subfolder paths:
-   - `subfolder1#image.png` → Saved to `destination/subfolder1/image.png`
-   - `ui#buttons#save.png` → Saved to `destination/ui/buttons/save.png`
-
-3. Combine with resize:
-   - `50% subfolder1#image.png` → Resized to 50%, saved to `destination/subfolder1/image.png`
-
-**Note**: You can use any delimiter character that's valid in filenames (e.g., `#`, `§`, `~`, etc.)
-
-**Note**: You can use either single backslashes (`\`), double backslashes (`\\`), or forward slashes (`/`) in paths - Python will handle them all correctly.
-
-### Configuration Examples
-
-**Windows:**
-```json
-{
-  "source_folder": "C:\\Users\\YourName\\Documents\\ProjectAssets",
-  "destination_folder": "D:\\Backup\\ProjectAssets"
-}
-```
-
-**macOS/Linux:**
-```json
-{
-  "source_folder": "/Users/YourName/Documents/ProjectAssets",
-  "destination_folder": "/Volumes/Backup/ProjectAssets"
-}
-```
+| Option | Type | Required | Description |
+|--------|------|----------|-------------|
+| `source_folders` | array | Yes | List of folder paths to monitor |
+| `destination_folder` | string | Yes | Where files will be copied to |
+| `ignore_extensions` | array | No | File extensions to ignore (e.g., `[".txt", ".bak.png"]`) |
+| `compress_png` | boolean | No | Enable high-quality PNG compression (default: false) |
+| `parse_filename_paths` | boolean | No | Extract folder paths from filenames (default: false) |
+| `filename_path_delimiter` | string | No | Delimiter for filename paths (default: "§") |
+| `parse_resize_from_filename` | boolean | No | Parse resize percentage from filename (default: false) |
+| `pngquant_path` | string | No | Path to pngquant executable (auto-detected if bundled) |
+| `debug` | boolean | No | Enable debug output (default: false) |
 
 ## Usage
 
-1. Configure your folders in `config.json`
-2. Run the script:
+### Running the Script
 
 ```bash
 python monitor_folder.py
 ```
 
-3. The script will start monitoring and display:
-   - Source folder being monitored
-   - Destination folder for copies
-   - Real-time updates when files are copied
+The script will:
+1. Load configuration from `config.json`
+2. Start monitoring all specified source folders
+3. Display monitoring status for each folder
+4. Continuously watch for file changes
+5. Automatically copy/process changed files to the destination
 
-4. Press `Ctrl+C` to stop monitoring
+**To stop monitoring**: Press `Ctrl+C`
 
-## How It Works
+### Using the Executable
 
-- The script uses the `watchdog` library to monitor file system events
-- When a file is created or modified in the source folder:
-  - The file is automatically copied to the destination folder
-  - The relative folder structure is preserved
-  - Existing files are replaced with newer versions
-- All subfolders are monitored recursively
+If you built the executable version:
+
+```bash
+# Windows
+cd dist\FolderMonitor
+FolderMonitor.exe
+
+# The executable must be in the same directory as config.json
+```
+
+## Advanced Features
+
+### PNG Compression
+
+The script uses high-quality PNG compression (90-100% quality) via pngquant:
+
+- **Quality Settings**: 90-100% (prioritizes visual fidelity over maximum compression)
+- **Compression Ratio**: Typically 40-50% file size reduction
+- **Processing**: Files are copied first, then compressed at destination
+
+**Requirements**: Install [pngquant](https://pngquant.org/)
+
+### Image Resizing
+
+Automatically resize images by adding a percentage prefix to the filename:
+
+**Examples**:
+- `50% character.png` → Resizes to 50% of original dimensions
+- `25% background.jpg` → Resizes to 25% of original dimensions
+
+**Requirements**: Install [ImageMagick](https://imagemagick.org/)
+
+**Processing Order**: Copy → Resize → Compress (if PNG)
+
+### Filename Path Parsing
+
+Encode subfolder structure directly in filenames using a delimiter:
+
+**Example with delimiter `§`**:
+- `ui§buttons§save.png` → Saved to `destination/ui/buttons/save.png`
+- `characters§player§idle.png` → Saved to `destination/characters/player/idle.png`
+
+**Combine with resizing**:
+- `50% ui§icons§menu.png` → Resized to 50% and saved to `destination/ui/icons/menu.png`
+
+### File Filtering
+
+Ignore specific file types by extension:
+
+```json
+{
+  "ignore_extensions": [".txt", ".bak", ".bak.png", ".tmp"]
+}
+```
+
+Supports multi-part extensions (e.g., `.bak.png`)
 
 ## Troubleshooting
 
-### "config.json not found" error
-- Make sure `config.json` is in the same directory as `monitor_folder.py`
+### "pngquant not found"
+- Install pngquant from [pngquant.org](https://pngquant.org/)
+- Add pngquant to your system PATH, or specify the full path in `config.json`
 
-### "Source folder does not exist" error
-- Check that the path in `config.json` is correct
-- Ensure the folder exists before running the script
+### "ImageMagick not found"
+- Install ImageMagick from [imagemagick.org](https://imagemagick.org/)
+- Make sure to check "Add to PATH" during installation
 
-### Files not copying
-- Check file permissions for both source and destination folders
-- Ensure destination folder is writable
+### Files not being monitored
+- Check that source folder paths in `config.json` are correct
+- Ensure the folder exists before starting the script
+- Verify the file extension isn't in the `ignore_extensions` list
 
-## Requirements
+### Compression not working
+- Verify pngquant is installed and accessible
+- Check the `pngquant_path` in config if specified
+- Enable `debug: true` in config to see detailed compression logs
 
-- Python 3.7+
-- watchdog 3.0.0
-- ImageMagick (optional, for image resizing)
-- pngquant (optional, for PNG compression)
+
+## License
+
+This project is open source and available for personal and commercial use.
+
+## Contributing
+
+Contributions are welcome! Feel free to submit issues or pull requests on the GitHub repository.
 
 ## License
 
