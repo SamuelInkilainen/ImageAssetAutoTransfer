@@ -1,0 +1,16 @@
+{
+  "source_folders": [
+      "C:\\Users\\SamuelInkilainen\\Documents\\Work_Local\\Crystal_cavern\\monitored_assets"
+  ],
+  "destination_folder": "C:\\Users\\SamuelInkilainen\\Documents\\hcr2\\ResourcesLocal\\textures",
+  "ignore_extensions": [
+    ".txt", 
+    ".bak",
+    ".bak.png"],
+  "compress_png": true,
+  "parse_filename_paths": true,
+  "filename_path_delimiter": "§",
+  "parse_resize_from_filename": true,
+  "pngquant_path": "C:\\Users\\SamuelInkilainen\\Documents\\pngquant\\pngquant.exe",
+  "debug": false
+}
