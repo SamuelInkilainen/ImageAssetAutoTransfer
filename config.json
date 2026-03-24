@@ -7,10 +7,12 @@
     ".txt", 
     ".bak",
     ".bak.png"],
+  "ignore_files_without_extension": true,
+  "processing_delay": 0.25,
   "compress_png": true,
   "parse_filename_paths": true,
   "filename_path_delimiter": "§",
   "parse_resize_from_filename": true,
   "pngquant_path": "C:\\Users\\SamuelInkilainen\\Documents\\pngquant\\pngquant.exe",
   "debug": false
-}
+} 

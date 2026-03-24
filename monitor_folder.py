@@ -18,11 +18,13 @@ class Colors:
 class FolderMonitorHandler(FileSystemEventHandler):
     """Handles file system events and copies changed files to destination."""
     
-    def __init__(self, source_path, destination_path, label=None, ignore_extensions=None, compress_png=False, pngquant_path=None, optipng_path=None, debug=False, parse_filename_paths=False, filename_path_delimiter='§', parse_resize_from_filename=False):
+    def __init__(self, source_path, destination_path, label=None, ignore_extensions=None, ignore_files_without_extension=False, processing_delay=0, compress_png=False, pngquant_path=None, optipng_path=None, debug=False, parse_filename_paths=False, filename_path_delimiter='§', parse_resize_from_filename=False):
         self.source_path = Path(source_path).resolve()
         self.destination_path = Path(destination_path).resolve()
         self.label = label or str(self.source_path)
         self.ignore_extensions = [ext.lower() if ext.startswith('.') else f'.{ext.lower()}' for ext in (ignore_extensions or [])]
+        self.ignore_files_without_extension = ignore_files_without_extension
+        self.processing_delay = processing_delay
         self.compress_png = compress_png
         
         # Auto-detect bundled pngquant if running as executable
@@ -68,6 +70,10 @@ class FolderMonitorHandler(FileSystemEventHandler):
         print(f"  Copying to: {self.destination_path}")
         if self.ignore_extensions:
             print(f"  Ignoring: {', '.join(self.ignore_extensions)}")
+        if self.ignore_files_without_extension:
+            print(f"  Ignoring files without extension: Enabled")
+        if self.processing_delay > 0:
+            print(f"  Processing Delay: {self.processing_delay}s")
         if self.compress_png:
             print(f"  PNG Compression: Enabled (quality 90-100)")
         if self.parse_filename_paths:
@@ -85,6 +91,24 @@ class FolderMonitorHandler(FileSystemEventHandler):
             
             # Show file detection
             print(f"\n→ Detected: {src_file.name}")
+            
+            # Wait for the configured delay (allows temp files to be cleaned up)
+            if self.processing_delay > 0:
+                if self.debug:
+                    print(f"  Waiting {self.processing_delay}s before processing...")
+                time.sleep(self.processing_delay)
+                
+                # After delay, check if file still exists (temp files may be deleted)
+                if not src_file.exists():
+                    if self.debug:
+                        print(f"  File no longer exists (likely a temp file) - skipping")
+                    return
+            
+            # Check if files without extensions should be ignored
+            if self.ignore_files_without_extension and not src_file.suffix:
+                if self.debug:
+                    print(f"  Skipping file without extension")
+                return
             
             # Check if file extension should be ignored
             if self.ignore_extensions:
@@ -468,6 +492,8 @@ def main():
     # Set up the observer with all source folders
     observer = Observer()
     ignore_extensions = config.get('ignore_extensions', [])
+    ignore_files_without_extension = config.get('ignore_files_without_extension', False)
+    processing_delay = config.get('processing_delay', 0)
     compress_png = config.get('compress_png', False)
     pngquant_path = config.get('pngquant_path', None)
     optipng_path = config.get('optipng_path', None)
@@ -478,7 +504,7 @@ def main():
     for item in source_folders:
         source_path = Path(item['path'])
         label = item.get('label', None)
-        event_handler = FolderMonitorHandler(source_path, destination_folder, label, ignore_extensions, compress_png, pngquant_path, optipng_path, debug, parse_filename_paths, filename_path_delimiter, parse_resize_from_filename)
+        event_handler = FolderMonitorHandler(source_path, destination_folder, label, ignore_extensions, ignore_files_without_extension, processing_delay, compress_png, pngquant_path, optipng_path, debug, parse_filename_paths, filename_path_delimiter, parse_resize_from_filename)
         observer.schedule(event_handler, str(source_path), recursive=True)
     
     # Start monitoring

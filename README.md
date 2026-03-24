@@ -1,3 +1,5 @@
+Disclaimer: This project is built entirely with Claude Sonnet 4.5 AI model and Github Copilot 
+
 # Image Asset Auto-Transfer
 
 A Python script that monitors specified folders (including subfolders) for file changes and automatically copies modified files to a destination folder. Perfect for game development workflows where assets need to be automatically synced between design tools and game project folders.
@@ -77,6 +79,8 @@ Edit the `config.json` file to configure the script for your needs.
   ],
   "destination_folder": "C:\\Users\\You\\GameProject\\Resources",
   "ignore_extensions": [".txt", ".bak", ".bak.png"],
+  "ignore_files_without_extension": true,
+  "processing_delay": 1.0,
   "compress_png": true,
   "parse_filename_paths": true,
   "filename_path_delimiter": "§",
@@ -93,11 +97,14 @@ Edit the `config.json` file to configure the script for your needs.
 | `source_folders` | array | Yes | List of folder paths to monitor |
 | `destination_folder` | string | Yes | Where files will be copied to |
 | `ignore_extensions` | array | No | File extensions to ignore (e.g., `[".txt", ".bak.png"]`) |
+| `ignore_files_without_extension` | boolean | No | Ignore files without file extensions (e.g., temp files) (default: false) |
+| `processing_delay` | number | No | Delay in seconds before processing files (allows temp files to be cleaned up) (default: 0) |
 | `compress_png` | boolean | No | Enable high-quality PNG compression (default: false) |
 | `parse_filename_paths` | boolean | No | Extract folder paths from filenames (default: false) |
 | `filename_path_delimiter` | string | No | Delimiter for filename paths (default: "§") |
 | `parse_resize_from_filename` | boolean | No | Parse resize percentage from filename (default: false) |
 | `pngquant_path` | string | No | Path to pngquant executable (auto-detected if bundled) |
+| `optipng_path` | string | No | Path to optipng executable (auto-detected if bundled) |
 | `debug` | boolean | No | Enable debug output (default: false) |
 
 ## Usage
@@ -176,6 +183,45 @@ Ignore specific file types by extension:
 
 Supports multi-part extensions (e.g., `.bak.png`)
 
+### Handling Photoshop Temporary Files
+
+Photoshop and other editing software often create temporary files (e.g., `filename_tmp2035`) during save operations. Two strategies help prevent these from being processed:
+
+**1. Ignore Files Without Extensions**
+
+Temporary files typically have no file extension. Enable this to skip them:
+
+```json
+{
+  "ignore_files_without_extension": true
+}
+```
+
+**2. Processing Delay**
+
+Wait a specified time before processing files, allowing the software to clean up temporary files:
+
+```json
+{
+  "processing_delay": 1.0
+}
+```
+
+- Delay is in seconds (supports decimals like `1.5`, `2.0`)
+- After the delay, if the file no longer exists (temp file was deleted), it's automatically skipped
+- Recommended value: `1.0` seconds for most workflows
+
+**Recommended Configuration for Photoshop/Design Tools:**
+
+```json
+{
+  "ignore_files_without_extension": true,
+  "processing_delay": 1.0
+}
+```
+
+This combination ensures temporary files are filtered out and gives the software time to complete its save operations.
+
 ## Troubleshooting
 
 ### "pngquant not found"
@@ -191,19 +237,16 @@ Supports multi-part extensions (e.g., `.bak.png`)
 - Ensure the folder exists before starting the script
 - Verify the file extension isn't in the `ignore_extensions` list
 
+### Temporary files being processed
+- Enable `ignore_files_without_extension: true` to skip files without extensions
+- Add a `processing_delay` (e.g., `1.0` seconds) to allow software to clean up temp files
+- See "Handling Photoshop Temporary Files" section for details
+
 ### Compression not working
 - Verify pngquant is installed and accessible
 - Check the `pngquant_path` in config if specified
 - Enable `debug: true` in config to see detailed compression logs
 
-
-## License
-
-This project is open source and available for personal and commercial use.
-
-## Contributing
-
-Contributions are welcome! Feel free to submit issues or pull requests on the GitHub repository.
 
 ## License
 
