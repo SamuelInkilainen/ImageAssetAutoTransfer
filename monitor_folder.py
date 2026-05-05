@@ -18,7 +18,7 @@ class Colors:
 class FolderMonitorHandler(FileSystemEventHandler):
     """Handles file system events and copies changed files to destination."""
     
-    def __init__(self, source_path, destination_path, label=None, ignore_extensions=None, ignore_files_without_extension=False, processing_delay=0, compress_png=False, pngquant_path=None, optipng_path=None, debug=False, parse_filename_paths=False, filename_path_delimiter='§', parse_resize_from_filename=False):
+    def __init__(self, source_path, destination_path, label=None, ignore_extensions=None, ignore_files_without_extension=False, processing_delay=0, compress_png=False, pngquant_path=None, optipng_path=None, debug=False, parse_filename_paths=False, filename_path_delimiter='§', parse_resize_from_filename=False, path_macros=None):
         self.source_path = Path(source_path).resolve()
         self.destination_path = Path(destination_path).resolve()
         self.label = label or str(self.source_path)
@@ -63,6 +63,8 @@ class FolderMonitorHandler(FileSystemEventHandler):
         self.parse_filename_paths = parse_filename_paths
         self.filename_path_delimiter = filename_path_delimiter
         self.parse_resize_from_filename = parse_resize_from_filename
+        self.path_macros = path_macros or {}
+        self._recently_processed = {}
         
         # Show configuration info on startup
         print(f"[{self.label}]")
@@ -80,6 +82,10 @@ class FolderMonitorHandler(FileSystemEventHandler):
             print(f"  Filename Path Parsing: Enabled (delimiter: '{self.filename_path_delimiter}')")
         if self.parse_resize_from_filename:
             print(f"  Resize from Filename: Enabled")
+        if self.path_macros:
+            print(f"  Path Macros:")
+            for macro, expansion in self.path_macros.items():
+                print(f"    {macro} → {expansion}")
         if self.debug:
             print(f"  Debug Mode: Enabled")
         print("-" * 50)
@@ -88,8 +94,15 @@ class FolderMonitorHandler(FileSystemEventHandler):
         """Copy a file from source to destination, preserving folder structure."""
         try:
             src_file = Path(src_path)
-            
-            # Show file detection
+                        # Deduplicate rapid events (watchdog fires both created and modified)
+            now = time.time()
+            last_time = self._recently_processed.get(str(src_file))
+            if last_time and (now - last_time) < (self.processing_delay + 1.0):
+                if self.debug:
+                    print(f"  Skipping duplicate event for {src_file.name}")
+                return
+            self._recently_processed[str(src_file)] = now
+                        # Show file detection
             print(f"\n→ Detected: {src_file.name}")
             
             # Wait for the configured delay (allows temp files to be cleaned up)
@@ -146,17 +159,31 @@ class FolderMonitorHandler(FileSystemEventHandler):
                     actual_filename = parts[-1]
                     subfolder_parts = parts[:-1]
                     
-                    # Create the subfolder path
-                    subfolder_path = Path(*subfolder_parts) if subfolder_parts else Path()
-                    
-                    # Combine with relative directory path (excluding filename)
-                    relative_dir = relative_path.parent
-                    if relative_dir != Path('.'):
-                        # File is in a subdirectory of source, preserve that structure
-                        dest_file = self.destination_path / relative_dir / subfolder_path / actual_filename
+                    # Check if first path segment matches a path macro
+                    if subfolder_parts and subfolder_parts[0] in self.path_macros:
+                        macro_name = subfolder_parts[0]
+                        macro_path = Path(self.path_macros[macro_name])
+                        remaining_parts = subfolder_parts[1:]
+                        
+                        if remaining_parts:
+                            dest_file = macro_path / Path(*remaining_parts) / actual_filename
+                        else:
+                            dest_file = macro_path / actual_filename
+                        
+                        if self.debug:
+                            print(f"  Path macro: {macro_name} → {macro_path}")
                     else:
-                        # File is in root of source folder
-                        dest_file = self.destination_path / subfolder_path / actual_filename
+                        # Create the subfolder path
+                        subfolder_path = Path(*subfolder_parts) if subfolder_parts else Path()
+                        
+                        # Combine with relative directory path (excluding filename)
+                        relative_dir = relative_path.parent
+                        if relative_dir != Path('.'):
+                            # File is in a subdirectory of source, preserve that structure
+                            dest_file = self.destination_path / relative_dir / subfolder_path / actual_filename
+                        else:
+                            # File is in root of source folder
+                            dest_file = self.destination_path / subfolder_path / actual_filename
                 else:
                     # No delimiter in filename, use normal behavior
                     dest_file = self.destination_path / relative_path
@@ -258,7 +285,11 @@ class FolderMonitorHandler(FileSystemEventHandler):
                                     print(f"[DEBUG] Error output: {result.stderr}")
                                     
                     except FileNotFoundError:
-                        print(f"  Copied to: {dest_file.relative_to(self.destination_path)}")
+                        try:
+                            display_path = dest_file.relative_to(self.destination_path)
+                        except ValueError:
+                            display_path = dest_file
+                        print(f"  Copied to: {display_path}")
                         print(f"{Colors.YELLOW}  Compression: Failed (pngquant not found){Colors.RESET}")
                         print(f"  Install pngquant: https://pngquant.org/")
                         self.compress_png = False
@@ -318,7 +349,11 @@ class FolderMonitorHandler(FileSystemEventHandler):
                                     print(f"[DEBUG] AdvPNG not found - skipping pass 2 optimization")
                     
                     # Calculate final compression ratio and display results
-                    print(f"  Copied to: {dest_file.relative_to(self.destination_path)}")
+                    try:
+                        display_path = dest_file.relative_to(self.destination_path)
+                    except ValueError:
+                        display_path = dest_file
+                    print(f"  Copied to: {display_path}")
                     
                     if pngquant_success:
                         compressed_size = dest_file.stat().st_size
@@ -341,7 +376,11 @@ class FolderMonitorHandler(FileSystemEventHandler):
                     print(f"{Colors.YELLOW}  Compression: Error{Colors.RESET}")
             else:
                 # Non-PNG file or compression disabled
-                print(f"  Copied to: {dest_file.relative_to(self.destination_path)}")
+                try:
+                    display_path = dest_file.relative_to(self.destination_path)
+                except ValueError:
+                    display_path = dest_file
+                print(f"  Copied to: {display_path}")
                 print(f"  {Colors.GREEN}✓ Success{Colors.RESET}")
             
         except Exception as e:
@@ -501,10 +540,11 @@ def main():
     parse_filename_paths = config.get('parse_filename_paths', False)
     filename_path_delimiter = config.get('filename_path_delimiter', '§')
     parse_resize_from_filename = config.get('parse_resize_from_filename', False)
+    path_macros = config.get('path_macros', {})
     for item in source_folders:
         source_path = Path(item['path'])
         label = item.get('label', None)
-        event_handler = FolderMonitorHandler(source_path, destination_folder, label, ignore_extensions, ignore_files_without_extension, processing_delay, compress_png, pngquant_path, optipng_path, debug, parse_filename_paths, filename_path_delimiter, parse_resize_from_filename)
+        event_handler = FolderMonitorHandler(source_path, destination_folder, label, ignore_extensions, ignore_files_without_extension, processing_delay, compress_png, pngquant_path, optipng_path, debug, parse_filename_paths, filename_path_delimiter, parse_resize_from_filename, path_macros)
         observer.schedule(event_handler, str(source_path), recursive=True)
     
     # Start monitoring

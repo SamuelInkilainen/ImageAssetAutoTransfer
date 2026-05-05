@@ -15,6 +15,7 @@ A Python script that monitors specified folders (including subfolders) for file 
 - **PNG Compression**: Optional high-quality PNG compression using pngquant (90-100% quality)
 - **Image Resizing**: Parse resize percentage from filename (e.g., `50% image.png` resizes to 50%)
 - **Filename Path Parsing**: Extract subfolder paths from filenames using a delimiter (e.g., `folder§subfolder§file.png`)
+- **Path Macros**: Define shorthand macros that reroute files to different destination paths (e.g., `ui§button.png` → a completely different folder)
 - **Cross-platform**: Works on Windows, macOS, and Linux
 - **Executable Version**: Can be built as a standalone executable (no Python required)
 
@@ -85,6 +86,9 @@ Edit the `config.json` file to configure the script for your needs.
   "parse_filename_paths": true,
   "filename_path_delimiter": "§",
   "parse_resize_from_filename": true,
+  "path_macros": {
+    "ui": "C:\\Users\\You\\GameProject\\UI\\cocosstudio"
+  },
   "pngquant_path": "C:\\Tools\\pngquant\\pngquant.exe",
   "debug": false
 }
@@ -103,6 +107,7 @@ Edit the `config.json` file to configure the script for your needs.
 | `parse_filename_paths` | boolean | No | Extract folder paths from filenames (default: false) |
 | `filename_path_delimiter` | string | No | Delimiter for filename paths (default: "§") |
 | `parse_resize_from_filename` | boolean | No | Parse resize percentage from filename (default: false) |
+| `path_macros` | object | No | Dictionary of shorthand macros that reroute files to different absolute paths (default: {}) |
 | `pngquant_path` | string | No | Path to pngquant executable (auto-detected if bundled) |
 | `optipng_path` | string | No | Path to optipng executable (auto-detected if bundled) |
 | `debug` | boolean | No | Enable debug output (default: false) |
@@ -170,6 +175,38 @@ Encode subfolder structure directly in filenames using a delimiter:
 
 **Combine with resizing**:
 - `50% ui§icons§menu.png` → Resized to 50% and saved to `destination/ui/icons/menu.png`
+
+### Path Macros
+
+Define shorthand macros that reroute files to entirely different destination paths. This is useful when your project has multiple output directories but you want to keep filenames short.
+
+When `parse_filename_paths` is enabled, the first segment before the delimiter is checked against `path_macros`. If it matches, the file is routed to that macro's absolute path instead of the normal `destination_folder`.
+
+**Configuration:**
+```json
+{
+  "destination_folder": "C:\\Project\\Resources\\textures",
+  "path_macros": {
+    "ui": "C:\\Project\\Resources\\ui\\cocosstudio",
+    "audio": "C:\\Project\\Resources\\sounds"
+  }
+}
+```
+
+**Examples:**
+- `ui§buttons§save.png` → `C:\Project\Resources\ui\cocosstudio\buttons\save.png`
+- `ui§icon.png` → `C:\Project\Resources\ui\cocosstudio\icon.png`
+- `audio§click.wav` → `C:\Project\Resources\sounds\click.wav`
+- `icons§menu.png` (no macro match) → `C:\Project\Resources\textures\icons\menu.png`
+
+**Combine with resizing and compression:**
+- `25% ui§badges§badge_neon.png` → Resized to 25%, compressed, saved to `ui\cocosstudio\badges\badge_neon.png`
+
+**Notes:**
+- Macros only match the first path segment (before the first `§`)
+- Matching is case-sensitive (`ui` ≠ `UI`)
+- Requires `parse_filename_paths` to be enabled
+- Files without a matching macro use the normal `destination_folder`
 
 ### File Filtering
 
