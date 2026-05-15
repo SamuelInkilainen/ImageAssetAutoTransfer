@@ -14,8 +14,11 @@ A Python script that monitors specified folders (including subfolders) for file 
 - **File Filtering**: Ignore specific file extensions (supports multi-part extensions like `.bak.png`)
 - **PNG Compression**: Optional high-quality PNG compression using pngquant (90-100% quality)
 - **Image Resizing**: Parse resize percentage from filename (e.g., `50% image.png` resizes to 50%)
+- **Automatic Scale Cleanup**: Automatically deletes old scale variations when saving new ones (e.g., saving `50% file.png` deletes `75% file.png`)
 - **Filename Path Parsing**: Extract subfolder paths from filenames using a delimiter (e.g., `folder§subfolder§file.png`)
 - **Path Macros**: Define shorthand macros that reroute files to different destination paths (e.g., `ui§button.png` → a completely different folder)
+- **File Stabilization**: Smart waiting that ensures complete files are transferred, even with complex save operations
+- **Runtime Debug Toggle**: Toggle debug output on/off while running without restarting the script
 - **Cross-platform**: Works on Windows, macOS, and Linux
 - **Executable Version**: Can be built as a standalone executable (no Python required)
 
@@ -81,7 +84,7 @@ Edit the `config.json` file to configure the script for your needs.
   "destination_folder": "C:\\Users\\You\\GameProject\\Resources",
   "ignore_extensions": [".txt", ".bak", ".bak.png"],
   "ignore_files_without_extension": true,
-  "processing_delay": 1.0,
+  "processing_delay": 0.25,
   "compress_png": true,
   "parse_filename_paths": true,
   "filename_path_delimiter": "§",
@@ -102,7 +105,7 @@ Edit the `config.json` file to configure the script for your needs.
 | `destination_folder` | string | Yes | Where files will be copied to |
 | `ignore_extensions` | array | No | File extensions to ignore (e.g., `[".txt", ".bak.png"]`) |
 | `ignore_files_without_extension` | boolean | No | Ignore files without file extensions (e.g., temp files) (default: false) |
-| `processing_delay` | number | No | Delay in seconds before processing files (allows temp files to be cleaned up) (default: 0) |
+| `processing_delay` | number | No | Poll interval in seconds for file stabilization (waits until file stops changing) (default: 0) |
 | `compress_png` | boolean | No | Enable high-quality PNG compression (default: false) |
 | `parse_filename_paths` | boolean | No | Extract folder paths from filenames (default: false) |
 | `filename_path_delimiter` | string | No | Delimiter for filename paths (default: "§") |
@@ -128,6 +131,15 @@ The script will:
 5. Automatically copy/process changed files to the destination
 
 **To stop monitoring**: Press `Ctrl+C`
+
+### Runtime Commands
+
+While the script is running, you can type commands in the console:
+
+- `debug true` - Enable debug output to see detailed processing information
+- `debug false` - Disable debug output for cleaner logs
+
+This allows you to troubleshoot issues without restarting the monitoring process.
 
 ### Using the Executable
 
@@ -164,6 +176,16 @@ Automatically resize images by adding a percentage prefix to the filename:
 **Requirements**: Install [ImageMagick](https://imagemagick.org/)
 
 **Processing Order**: Copy → Resize → Compress (if PNG)
+
+**Automatic Scale Variation Cleanup**:
+
+When you save a file with a scale prefix, the script automatically deletes other scale variations from the source folder to prevent conflicts:
+
+- Save `50% badge.png` → Automatically deletes `75% badge.png`, `90% badge.png`, etc.
+- Save `25% icon.png` → Automatically deletes any other `XX% icon.png` files
+- Only files with the same base name are affected (different files are unaffected)
+
+This ensures you always have only one scale variation per asset in your source folder and prevents accidentally transferring outdated versions.
 
 ### Filename Path Parsing
 
@@ -234,30 +256,38 @@ Temporary files typically have no file extension. Enable this to skip them:
 }
 ```
 
-**2. Processing Delay**
+**2. Processing Delay with File Stabilization**
 
-Wait a specified time before processing files, allowing the software to clean up temporary files:
+Wait for files to stabilize before processing, allowing the software to complete its save operations:
 
 ```json
 {
-  "processing_delay": 1.0
+  "processing_delay": 0.25
 }
 ```
 
-- Delay is in seconds (supports decimals like `1.5`, `2.0`)
-- After the delay, if the file no longer exists (temp file was deleted), it's automatically skipped
-- Recommended value: `1.0` seconds for most workflows
+- The script polls the file every `processing_delay` seconds
+- Processing begins only when the file's size and modification time stop changing
+- Automatically handles complex save operations (modify → delete → recreate → write)
+- Maximum wait time: ~10 seconds (then processes anyway)
+- Recommended value: `0.25` seconds for responsive monitoring
+
+**How it works:**
+1. File change detected → Start monitoring
+2. Check file size and modification time every 0.25s
+3. When two consecutive checks match → File is stable, begin processing
+4. If file disappears during monitoring → Skip (was a temp file)
 
 **Recommended Configuration for Photoshop/Design Tools:**
 
 ```json
 {
   "ignore_files_without_extension": true,
-  "processing_delay": 1.0
+  "processing_delay": 0.25
 }
 ```
 
-This combination ensures temporary files are filtered out and gives the software time to complete its save operations.
+This combination ensures temporary files are filtered out and the file stabilization system waits for the complete file to be saved before processing.
 
 ## Troubleshooting
 
@@ -283,6 +313,13 @@ This combination ensures temporary files are filtered out and gives the software
 - Verify pngquant is installed and accessible
 - Check the `pngquant_path` in config if specified
 - Enable `debug: true` in config to see detailed compression logs
+- Or type `debug true` in the console while running for real-time debug output
+
+### Old file content being transferred
+- The file stabilization system should handle this automatically
+- Try increasing `processing_delay` to `0.5` if issues persist
+- Enable debug mode (`debug true`) to see stabilization timing
+- Check that no other process is modifying files during transfer
 
 
 ## License

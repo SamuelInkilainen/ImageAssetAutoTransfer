@@ -63,10 +63,13 @@ if dist_folder.exists():
             "source_folders": ["C:\\Path\\To\\Your\\Source\\Folder"],
             "destination_folder": "C:\\Path\\To\\Your\\Destination\\Folder",
             "ignore_extensions": config_data.get("ignore_extensions", [".txt", ".bak"]),
+            "ignore_files_without_extension": config_data.get("ignore_files_without_extension", True),
+            "processing_delay": config_data.get("processing_delay", 0.25),
             "compress_png": config_data.get("compress_png", False),
             "parse_filename_paths": config_data.get("parse_filename_paths", False),
             "filename_path_delimiter": config_data.get("filename_path_delimiter", "§"),
             "parse_resize_from_filename": config_data.get("parse_resize_from_filename", False),
+            "path_macros": config_data.get("path_macros", {}),
             "debug": False
         }
         

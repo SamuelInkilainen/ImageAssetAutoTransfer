@@ -47,31 +47,28 @@ This will create a `dist/FolderMonitor` folder containing:
    - Extract the zip file anywhere on their computer
    - Edit `config.json` with their source/destination folders
    - Double-click `FolderMonitor.exe` to start monitoring
+   - Type `debug true` or `debug false` in the console to toggle debug output
    - Press Ctrl+C in the console to stop
 
 ## Important Notes
 
 ### Config File
 - `config.json` remains **fully editable** - each user can customize paths
-- Users can enable/disable compression
-- Users can adjust quality settings by editing the file
+- Users can enable/disable compression, resizing, and other features
+- Debug mode can be toggled at runtime with `debug true`/`debug false` commands
+- File stabilization (`processing_delay`) ensures complete saves are transferred
 
 ### Updating pngquant Paths
 Since pngquant is bundled, users should use these settings in `config.json`:
 ```json
 {
   "compress_png": true,
-  "pngquant_path": "pngquant/pngquant.exe"
+  "processing_delay": 0.25,
+  "ignore_files_without_extension": true
 }
 ```
 
-Or simply:
-```json
-{
-  "compress_png": true
-}
-```
-The application will automatically find the bundled pngquant.
+The application will automatically find the bundled pngquant. The `processing_delay` setting enables file stabilization to ensure complete files are transferred.
 
 ### File Size
 The executable folder will be around 20-30 MB due to bundled Python runtime.

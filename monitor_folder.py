@@ -4,6 +4,7 @@ import time
 import shutil
 import subprocess
 import re
+import threading
 from pathlib import Path
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
@@ -105,17 +106,38 @@ class FolderMonitorHandler(FileSystemEventHandler):
                         # Show file detection
             print(f"\n→ Detected: {src_file.name}")
             
-            # Wait for the configured delay (allows temp files to be cleaned up)
+            # Wait for file to stabilize (application may delete+recreate during save)
             if self.processing_delay > 0:
                 if self.debug:
-                    print(f"  Waiting {self.processing_delay}s before processing...")
-                time.sleep(self.processing_delay)
-                
-                # After delay, check if file still exists (temp files may be deleted)
-                if not src_file.exists():
+                    print(f"  Waiting for file to stabilize...")
+                prev_stat = None
+                max_attempts = int(10 / self.processing_delay)  # Max ~10 seconds
+                for attempt in range(max_attempts):
+                    time.sleep(self.processing_delay)
+                    
+                    if not src_file.exists():
+                        if self.debug:
+                            print(f"  File no longer exists (likely a temp file) - skipping")
+                        self._recently_processed.pop(str(src_file), None)
+                        return
+                    
+                    try:
+                        stat = src_file.stat()
+                        current_stat = (stat.st_size, stat.st_mtime)
+                    except OSError:
+                        if self.debug:
+                            print(f"  File became inaccessible - skipping")
+                        self._recently_processed.pop(str(src_file), None)
+                        return
+                    
+                    if prev_stat == current_stat:
+                        if self.debug:
+                            print(f"  File stable after {(attempt + 1) * self.processing_delay:.2f}s")
+                        break
+                    prev_stat = current_stat
+                else:
                     if self.debug:
-                        print(f"  File no longer exists (likely a temp file) - skipping")
-                    return
+                        print(f"  Warning: File did not stabilize within timeout, processing anyway")
             
             # Check if files without extensions should be ignored
             if self.ignore_files_without_extension and not src_file.suffix:
@@ -127,10 +149,14 @@ class FolderMonitorHandler(FileSystemEventHandler):
             if self.ignore_extensions:
                 # Check both single extension and multi-part extensions (e.g., .bak.png)
                 if src_file.suffix.lower() in self.ignore_extensions:
+                    if self.debug:
+                        print(f"[DEBUG] Ignoring {src_file.name} (extension {src_file.suffix})")
                     return  # Skip ignored file types
                 # Check for multi-part extensions
                 for ext in self.ignore_extensions:
                     if src_file.name.lower().endswith(ext.lower()):
+                        if self.debug:
+                            print(f"[DEBUG] Ignoring {src_file.name} (extension {ext})")
                         return  # Skip ignored file types
             
             # Calculate relative path from source folder
@@ -147,6 +173,21 @@ class FolderMonitorHandler(FileSystemEventHandler):
                 if resize_match:
                     resize_percentage = int(resize_match.group(1))
                     filename = resize_match.group(2)  # Remove the percentage prefix
+                    
+                    # Delete old scale variations of the same base filename from source folder
+                    src_dir = src_file.parent
+                    for sibling in src_dir.iterdir():
+                        if sibling == src_file or sibling.is_dir():
+                            continue
+                        sibling_match = re.match(r'^(\d+)%\s+(.+)$', sibling.name)
+                        if sibling_match and sibling_match.group(2) == filename:
+                            try:
+                                sibling.unlink()
+                                print(f"  Deleted old variation: {sibling.name}")
+                                if self.debug:
+                                    print(f"[DEBUG] Removed old scale variation {sibling_match.group(1)}% from source")
+                            except Exception as e:
+                                print(f"{Colors.YELLOW}  Warning: Could not delete old variation {sibling.name}: {e}{Colors.RESET}")
             
             # Parse filename paths if enabled
             if self.parse_filename_paths:
@@ -191,6 +232,9 @@ class FolderMonitorHandler(FileSystemEventHandler):
                 # Normal behavior: preserve folder structure
                 dest_file = self.destination_path / relative_path
             
+            if self.debug:
+                print(f"[DEBUG] Resolved destination: {dest_file}")
+            
             # Create destination directory if it doesn't exist
             dest_file.parent.mkdir(parents=True, exist_ok=True)
             
@@ -213,8 +257,7 @@ class FolderMonitorHandler(FileSystemEventHandler):
                             timeout=30
                         )
                         if result.returncode == 0:
-                            if self.debug:
-                                print(f"  Resized to {resize_percentage}%")
+                            print(f"  Resized to {resize_percentage}%")
                         else:
                             raise subprocess.CalledProcessError(result.returncode, 'magick')
                     except (FileNotFoundError, subprocess.CalledProcessError):
@@ -383,6 +426,10 @@ class FolderMonitorHandler(FileSystemEventHandler):
                 print(f"  Copied to: {display_path}")
                 print(f"  {Colors.GREEN}✓ Success{Colors.RESET}")
             
+            # Update dedup timestamp after processing to prevent re-processing
+            # (processing can take longer than the dedup window)
+            self._recently_processed[str(src_file)] = time.time()
+            
         except Exception as e:
             print(f"  {Colors.RED}✗ Failed: {str(e)}{Colors.RESET}")
     
@@ -541,15 +588,39 @@ def main():
     filename_path_delimiter = config.get('filename_path_delimiter', '§')
     parse_resize_from_filename = config.get('parse_resize_from_filename', False)
     path_macros = config.get('path_macros', {})
+    handlers = []
     for item in source_folders:
         source_path = Path(item['path'])
         label = item.get('label', None)
         event_handler = FolderMonitorHandler(source_path, destination_folder, label, ignore_extensions, ignore_files_without_extension, processing_delay, compress_png, pngquant_path, optipng_path, debug, parse_filename_paths, filename_path_delimiter, parse_resize_from_filename, path_macros)
         observer.schedule(event_handler, str(source_path), recursive=True)
+        handlers.append(event_handler)
     
     # Start monitoring
     observer.start()
-    print(f"\nMonitoring {len(source_folders)} folder(s). Press Ctrl+C to stop.\n")
+    print(f"\nMonitoring {len(source_folders)} folder(s). Press Ctrl+C to stop.")
+    print(f"Type 'debug true' or 'debug false' to toggle debug output.\n")
+    
+    # Start console input listener for runtime commands
+    def input_listener():
+        while True:
+            try:
+                cmd = input().strip().lower()
+                if cmd == 'debug true':
+                    for h in handlers:
+                        h.debug = True
+                    print(f"{Colors.GREEN}Debug mode: Enabled{Colors.RESET}")
+                elif cmd == 'debug false':
+                    for h in handlers:
+                        h.debug = False
+                    print(f"{Colors.GREEN}Debug mode: Disabled{Colors.RESET}")
+                elif cmd:
+                    print(f"Unknown command: {cmd}")
+            except EOFError:
+                break
+    
+    listener_thread = threading.Thread(target=input_listener, daemon=True)
+    listener_thread.start()
     
     try:
         while True: 
