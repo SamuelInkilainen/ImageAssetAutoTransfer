@@ -65,7 +65,6 @@ class FolderMonitorHandler(FileSystemEventHandler):
         self.filename_path_delimiter = filename_path_delimiter
         self.parse_resize_from_filename = parse_resize_from_filename
         self.path_macros = path_macros or {}
-        self._recently_processed = {}
         
         # Show configuration info on startup
         print(f"[{self.label}]")
@@ -95,15 +94,8 @@ class FolderMonitorHandler(FileSystemEventHandler):
         """Copy a file from source to destination, preserving folder structure."""
         try:
             src_file = Path(src_path)
-                        # Deduplicate rapid events (watchdog fires both created and modified)
-            now = time.time()
-            last_time = self._recently_processed.get(str(src_file))
-            if last_time and (now - last_time) < (self.processing_delay + 1.0):
-                if self.debug:
-                    print(f"  Skipping duplicate event for {src_file.name}")
-                return
-            self._recently_processed[str(src_file)] = now
-                        # Show file detection
+            
+            # Show file detection
             print(f"\n→ Detected: {src_file.name}")
             
             # Wait for file to stabilize (application may delete+recreate during save)
@@ -118,7 +110,6 @@ class FolderMonitorHandler(FileSystemEventHandler):
                     if not src_file.exists():
                         if self.debug:
                             print(f"  File no longer exists (likely a temp file) - skipping")
-                        self._recently_processed.pop(str(src_file), None)
                         return
                     
                     try:
@@ -127,7 +118,6 @@ class FolderMonitorHandler(FileSystemEventHandler):
                     except OSError:
                         if self.debug:
                             print(f"  File became inaccessible - skipping")
-                        self._recently_processed.pop(str(src_file), None)
                         return
                     
                     if prev_stat == current_stat:
@@ -425,10 +415,6 @@ class FolderMonitorHandler(FileSystemEventHandler):
                     display_path = dest_file
                 print(f"  Copied to: {display_path}")
                 print(f"  {Colors.GREEN}✓ Success{Colors.RESET}")
-            
-            # Update dedup timestamp after processing to prevent re-processing
-            # (processing can take longer than the dedup window)
-            self._recently_processed[str(src_file)] = time.time()
             
         except Exception as e:
             print(f"  {Colors.RED}✗ Failed: {str(e)}{Colors.RESET}")
