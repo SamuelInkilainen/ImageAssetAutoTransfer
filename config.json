@@ -6,13 +6,15 @@
   "ignore_extensions": [
     ".txt", 
     ".bak",
-    ".bak.png"],
+    ".bak.png"], 
   "ignore_files_without_extension": true,
   "processing_delay": 0.25,
   "compress_png": true,
   "parse_filename_paths": true,
   "filename_path_delimiter": "§",
   "parse_resize_from_filename": true,
+  "skip_compression_prefix_enabled": true,
+  "skip_compression_prefix": "#",
   "path_macros": {
     "UI": "C:\\Users\\SamuelInkilainen\\Documents\\hcr2\\ResourcesLocal\\ui\\cocosstudio"
   },

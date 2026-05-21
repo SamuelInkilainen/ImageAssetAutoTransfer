@@ -19,7 +19,7 @@ class Colors:
 class FolderMonitorHandler(FileSystemEventHandler):
     """Handles file system events and copies changed files to destination."""
     
-    def __init__(self, source_path, destination_path, label=None, ignore_extensions=None, ignore_files_without_extension=False, processing_delay=0, compress_png=False, pngquant_path=None, optipng_path=None, debug=False, parse_filename_paths=False, filename_path_delimiter='§', parse_resize_from_filename=False, path_macros=None):
+    def __init__(self, source_path, destination_path, label=None, ignore_extensions=None, ignore_files_without_extension=False, processing_delay=0, compress_png=False, pngquant_path=None, optipng_path=None, debug=False, parse_filename_paths=False, filename_path_delimiter='§', parse_resize_from_filename=False, skip_compression_prefix_enabled=False, skip_compression_prefix='!', path_macros=None):
         self.source_path = Path(source_path).resolve()
         self.destination_path = Path(destination_path).resolve()
         self.label = label or str(self.source_path)
@@ -64,6 +64,8 @@ class FolderMonitorHandler(FileSystemEventHandler):
         self.parse_filename_paths = parse_filename_paths
         self.filename_path_delimiter = filename_path_delimiter
         self.parse_resize_from_filename = parse_resize_from_filename
+        self.skip_compression_prefix_enabled = skip_compression_prefix_enabled
+        self.skip_compression_prefix = skip_compression_prefix
         self.path_macros = path_macros or {}
         
         # Show configuration info on startup
@@ -82,6 +84,8 @@ class FolderMonitorHandler(FileSystemEventHandler):
             print(f"  Filename Path Parsing: Enabled (delimiter: '{self.filename_path_delimiter}')")
         if self.parse_resize_from_filename:
             print(f"  Resize from Filename: Enabled")
+        if self.skip_compression_prefix_enabled:
+            print(f"  Skip Compression Prefix: Enabled (prefix: '{self.skip_compression_prefix}')")
         if self.path_macros:
             print(f"  Path Macros:")
             for macro, expansion in self.path_macros.items():
@@ -154,7 +158,15 @@ class FolderMonitorHandler(FileSystemEventHandler):
             
             # Variables for resize and filename parsing
             resize_percentage = None
+            skip_compression_for_file = False
             filename = src_file.name
+            
+            # Parse skip compression prefix from filename if enabled
+            if self.skip_compression_prefix_enabled and filename.startswith(self.skip_compression_prefix):
+                skip_compression_for_file = True
+                filename = filename[len(self.skip_compression_prefix):]  # Remove the prefix
+                if self.debug:
+                    print(f"  Skip compression prefix detected, compression will be skipped")
             
             # Parse resize percentage from filename if enabled
             if self.parse_resize_from_filename:
@@ -270,7 +282,7 @@ class FolderMonitorHandler(FileSystemEventHandler):
                     print(f"{Colors.YELLOW}  Warning: Failed to resize image: {str(e)}{Colors.RESET}")
             
             # Compress PNG files if enabled (TinyPNG-like multi-pass approach)
-            if self.compress_png and src_file.suffix.lower() == '.png':
+            if self.compress_png and src_file.suffix.lower() == '.png' and not skip_compression_for_file:
                 try:
                     # Get original file size for comparison
                     original_size = dest_file.stat().st_size
@@ -414,6 +426,8 @@ class FolderMonitorHandler(FileSystemEventHandler):
                 except ValueError:
                     display_path = dest_file
                 print(f"  Copied to: {display_path}")
+                if skip_compression_for_file and src_file.suffix.lower() == '.png':
+                    print(f"  Compression: Skipped (prefix detected)")
                 print(f"  {Colors.GREEN}✓ Success{Colors.RESET}")
             
         except Exception as e:
@@ -573,12 +587,14 @@ def main():
     parse_filename_paths = config.get('parse_filename_paths', False)
     filename_path_delimiter = config.get('filename_path_delimiter', '§')
     parse_resize_from_filename = config.get('parse_resize_from_filename', False)
+    skip_compression_prefix_enabled = config.get('skip_compression_prefix_enabled', False)
+    skip_compression_prefix = config.get('skip_compression_prefix', '!')
     path_macros = config.get('path_macros', {})
     handlers = []
     for item in source_folders:
         source_path = Path(item['path'])
         label = item.get('label', None)
-        event_handler = FolderMonitorHandler(source_path, destination_folder, label, ignore_extensions, ignore_files_without_extension, processing_delay, compress_png, pngquant_path, optipng_path, debug, parse_filename_paths, filename_path_delimiter, parse_resize_from_filename, path_macros)
+        event_handler = FolderMonitorHandler(source_path, destination_folder, label, ignore_extensions, ignore_files_without_extension, processing_delay, compress_png, pngquant_path, optipng_path, debug, parse_filename_paths, filename_path_delimiter, parse_resize_from_filename, skip_compression_prefix_enabled, skip_compression_prefix, path_macros)
         observer.schedule(event_handler, str(source_path), recursive=True)
         handlers.append(event_handler)
     

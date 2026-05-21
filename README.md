@@ -13,6 +13,7 @@ A Python script that monitors specified folders (including subfolders) for file 
 - **Multi-Source Support**: Monitor multiple source folders simultaneously
 - **File Filtering**: Ignore specific file extensions (supports multi-part extensions like `.bak.png`)
 - **PNG Compression**: Optional high-quality PNG compression using pngquant (90-100% quality)
+- **Skip Compression Prefix**: Selectively disable compression for specific files using a filename prefix
 - **Image Resizing**: Parse resize percentage from filename (e.g., `50% image.png` resizes to 50%)
 - **Automatic Scale Cleanup**: Automatically deletes old scale variations when saving new ones (e.g., saving `50% file.png` deletes `75% file.png`)
 - **Filename Path Parsing**: Extract subfolder paths from filenames using a delimiter (e.g., `folder§subfolder§file.png`)
@@ -89,6 +90,8 @@ Edit the `config.json` file to configure the script for your needs.
   "parse_filename_paths": true,
   "filename_path_delimiter": "§",
   "parse_resize_from_filename": true,
+  "skip_compression_prefix_enabled": false,
+  "skip_compression_prefix": "!",
   "path_macros": {
     "ui": "C:\\Users\\You\\GameProject\\UI\\cocosstudio"
   },
@@ -110,6 +113,8 @@ Edit the `config.json` file to configure the script for your needs.
 | `parse_filename_paths` | boolean | No | Extract folder paths from filenames (default: false) |
 | `filename_path_delimiter` | string | No | Delimiter for filename paths (default: "§") |
 | `parse_resize_from_filename` | boolean | No | Parse resize percentage from filename (default: false) |
+| `skip_compression_prefix_enabled` | boolean | No | Enable skip compression prefix feature (default: false) |
+| `skip_compression_prefix` | string | No | Prefix that disables compression for files (default: "!") |
 | `path_macros` | object | No | Dictionary of shorthand macros that reroute files to different absolute paths (default: {}) |
 | `pngquant_path` | string | No | Path to pngquant executable (auto-detected if bundled) |
 | `optipng_path` | string | No | Path to optipng executable (auto-detected if bundled) |
@@ -164,6 +169,46 @@ The script uses high-quality PNG compression (90-100% quality) via pngquant:
 - **Processing**: Files are copied first, then compressed at destination
 
 **Requirements**: Install [pngquant](https://pngquant.org/)
+
+### Skip Compression Prefix
+
+Selectively disable PNG compression for specific files by adding a prefix to the filename. This is useful when you have pre-optimized images or assets that shouldn't be recompressed.
+
+**Configuration:**
+```json
+{
+  "skip_compression_prefix_enabled": true,
+  "skip_compression_prefix": "!"
+}
+```
+
+**Examples**:
+- `!logo.png` → Copied as `logo.png` (no compression, prefix removed)
+- `!character_sprite.png` → Copied as `character_sprite.png` (no compression)
+- `background.png` → Copied as `background.png` (compressed normally if `compress_png` is true)
+
+**Custom Prefixes:**
+
+You can use any single character or string as the prefix:
+
+```json
+{
+  "skip_compression_prefix": "RAW_"
+}
+```
+
+- `RAW_texture.png` → Copied as `texture.png` (no compression)
+
+**Combining with Other Features:**
+- `!50% icon.png` → Resized to 50%, no compression, saved as `icon.png`
+- `!ui§buttons§save.png` → No compression, saved to `ui/buttons/save.png`
+
+**Processing Order**: Copy → Resize (if applicable) → Compress (skipped if prefix detected)
+
+**Notes:**
+- The prefix is automatically removed from the destination filename
+- Only affects PNG files (compression is PNG-only)
+- Files without the prefix are processed normally
 
 ### Image Resizing
 
