@@ -19,13 +19,12 @@ class Colors:
 class FolderMonitorHandler(FileSystemEventHandler):
     """Handles file system events and copies changed files to destination."""
     
-    def __init__(self, source_path, destination_path, label=None, ignore_extensions=None, ignore_files_without_extension=False, processing_delay=0, compress_png=False, pngquant_path=None, optipng_path=None, debug=False, parse_filename_paths=False, filename_path_delimiter='§', parse_resize_from_filename=False, skip_compression_prefix_enabled=False, skip_compression_prefix='!', path_macros=None):
+    def __init__(self, source_path, destination_path, label=None, ignore_extensions=None, ignore_files_without_extension=False, compress_png=False, pngquant_path=None, optipng_path=None, debug=False, parse_filename_paths=False, filename_path_delimiter='§', parse_resize_from_filename=False, skip_compression_prefix_enabled=False, skip_compression_prefix='!', path_macros=None, cooldown=5.0):
         self.source_path = Path(source_path).resolve()
         self.destination_path = Path(destination_path).resolve()
         self.label = label or str(self.source_path)
         self.ignore_extensions = [ext.lower() if ext.startswith('.') else f'.{ext.lower()}' for ext in (ignore_extensions or [])]
         self.ignore_files_without_extension = ignore_files_without_extension
-        self.processing_delay = processing_delay
         self.compress_png = compress_png
         
         # Auto-detect bundled pngquant if running as executable
@@ -71,7 +70,8 @@ class FolderMonitorHandler(FileSystemEventHandler):
         self._debounce_lock = threading.Lock()
         self._debounce_delay = 1.0  # Seconds to wait before processing after last event
         self._recently_processed = {}  # key -> timestamp of last processing completion
-        self._cooldown = 3.0  # Seconds to ignore duplicate events after processing a file
+        self._cooldown = cooldown  # Seconds to ignore duplicate events after processing a file
+        self._print_lock = threading.Lock()  # Serializes per-file log output
         
         # Show configuration info on startup
         print(f"[{self.label}]")
@@ -81,8 +81,6 @@ class FolderMonitorHandler(FileSystemEventHandler):
             print(f"  Ignoring: {', '.join(self.ignore_extensions)}")
         if self.ignore_files_without_extension:
             print(f"  Ignoring files without extension: Enabled")
-        if self.processing_delay > 0:
-            print(f"  Processing Delay: {self.processing_delay}s")
         if self.compress_png:
             print(f"  PNG Compression: Enabled (quality 90-100)")
         if self.parse_filename_paths:
@@ -99,87 +97,63 @@ class FolderMonitorHandler(FileSystemEventHandler):
             print(f"  Debug Mode: Enabled")
         print("-" * 50)
     
+    def _flush_log(self, log):
+        """Print buffered log lines atomically so concurrent file outputs don't interleave."""
+        if log:
+            with self._print_lock:
+                print("\n".join(log))
+
     def copy_file(self, src_path):
         """Copy a file from source to destination, preserving folder structure."""
+        log = []
         try:
             src_file = Path(src_path)
-            
-            # Show file detection
-            print(f"\n→ Detected: {src_file.name}")
-            
-            # Wait for file to stabilize (application may delete+recreate during save)
-            if self.processing_delay > 0:
+
+            log.append(f"\n→ Detected: {src_file.name}")
+
+            # Skip if file no longer exists (e.g., temp file from atomic save)
+            if not src_file.exists():
                 if self.debug:
-                    print(f"  Waiting for file to stabilize...")
-                # Initialize prev_stat with current file state so the first comparison is meaningful
-                try:
-                    init_stat = src_file.stat()
-                    prev_stat = (init_stat.st_size, init_stat.st_mtime)
-                except OSError:
-                    if self.debug:
-                        print(f"  File became inaccessible - skipping")
-                    return
-                max_attempts = int(10 / self.processing_delay)  # Max ~10 seconds
-                for attempt in range(max_attempts):
-                    time.sleep(self.processing_delay)
-                    
-                    if not src_file.exists():
-                        if self.debug:
-                            print(f"  File no longer exists (likely a temp file) - skipping")
-                        return
-                    
-                    try:
-                        stat = src_file.stat()
-                        current_stat = (stat.st_size, stat.st_mtime)
-                    except OSError:
-                        if self.debug:
-                            print(f"  File became inaccessible - skipping")
-                        return
-                    
-                    if prev_stat == current_stat:
-                        if self.debug:
-                            print(f"  File stable after {(attempt + 1) * self.processing_delay:.2f}s")
-                        break
-                    prev_stat = current_stat
-                else:
-                    if self.debug:
-                        print(f"  Warning: File did not stabilize within timeout, processing anyway")
-            
+                    log.append(f"  File no longer exists - skipping")
+                self._flush_log(log)
+                return
+
             # Check if files without extensions should be ignored
             if self.ignore_files_without_extension and not src_file.suffix:
                 if self.debug:
-                    print(f"  Skipping file without extension")
+                    log.append(f"  Skipping file without extension")
+                self._flush_log(log)
                 return
-            
+
             # Check if file extension should be ignored
             if self.ignore_extensions:
-                # Check both single extension and multi-part extensions (e.g., .bak.png)
                 if src_file.suffix.lower() in self.ignore_extensions:
                     if self.debug:
-                        print(f"[DEBUG] Ignoring {src_file.name} (extension {src_file.suffix})")
-                    return  # Skip ignored file types
-                # Check for multi-part extensions
+                        log.append(f"[DEBUG] Ignoring {src_file.name} (extension {src_file.suffix})")
+                    self._flush_log(log)
+                    return
                 for ext in self.ignore_extensions:
                     if src_file.name.lower().endswith(ext.lower()):
                         if self.debug:
-                            print(f"[DEBUG] Ignoring {src_file.name} (extension {ext})")
-                        return  # Skip ignored file types
-            
+                            log.append(f"[DEBUG] Ignoring {src_file.name} (extension {ext})")
+                        self._flush_log(log)
+                        return
+
             # Calculate relative path from source folder
             relative_path = src_file.relative_to(self.source_path)
-            
+
             # Variables for resize and filename parsing
             resize_percentage = None
             skip_compression_for_file = False
             filename = src_file.name
-            
+
             # Parse skip compression prefix from filename if enabled
             if self.skip_compression_prefix_enabled and filename.startswith(self.skip_compression_prefix):
                 skip_compression_for_file = True
                 filename = filename[len(self.skip_compression_prefix):]  # Remove the prefix
                 if self.debug:
-                    print(f"  Skip compression prefix detected, compression will be skipped")
-            
+                    log.append(f"  Skip compression prefix detected, compression will be skipped")
+
             # Parse resize percentage from filename if enabled
             if self.parse_resize_from_filename:
                 # Match pattern like "50% " at the start of filename
@@ -187,7 +161,7 @@ class FolderMonitorHandler(FileSystemEventHandler):
                 if resize_match:
                     resize_percentage = int(resize_match.group(1))
                     filename = resize_match.group(2)  # Remove the percentage prefix
-                    
+
                     # Delete old scale variations of the same base filename from source folder
                     src_dir = src_file.parent
                     for sibling in src_dir.iterdir():
@@ -197,47 +171,45 @@ class FolderMonitorHandler(FileSystemEventHandler):
                         if sibling_match and sibling_match.group(2) == filename:
                             try:
                                 sibling.unlink()
-                                print(f"  Deleted old variation: {sibling.name}")
+                                log.append(f"  Deleted old variation: {sibling.name}")
                                 if self.debug:
-                                    print(f"[DEBUG] Removed old scale variation {sibling_match.group(1)}% from source")
+                                    log.append(f"[DEBUG] Removed old scale variation {sibling_match.group(1)}% from source")
                             except Exception as e:
-                                print(f"{Colors.YELLOW}  Warning: Could not delete old variation {sibling.name}: {e}{Colors.RESET}")
-            
+                                log.append(f"{Colors.YELLOW}  Warning: Could not delete old variation {sibling.name}: {e}{Colors.RESET}")
+
             # Parse filename paths if enabled
             if self.parse_filename_paths:
                 # Check if delimiter exists in filename
                 if self.filename_path_delimiter in filename:
                     # Split filename by delimiter to get path parts
                     parts = filename.split(self.filename_path_delimiter)
-                    
+
                     # Last part is the actual filename, everything before is the path
                     actual_filename = parts[-1]
                     subfolder_parts = parts[:-1]
-                    
+
                     # Check if first path segment matches a path macro
                     if subfolder_parts and subfolder_parts[0] in self.path_macros:
                         macro_name = subfolder_parts[0]
                         macro_path = Path(self.path_macros[macro_name])
                         remaining_parts = subfolder_parts[1:]
-                        
+
                         if remaining_parts:
                             dest_file = macro_path / Path(*remaining_parts) / actual_filename
                         else:
                             dest_file = macro_path / actual_filename
-                        
+
                         if self.debug:
-                            print(f"  Path macro: {macro_name} → {macro_path}")
+                            log.append(f"  Path macro: {macro_name} → {macro_path}")
                     else:
                         # Create the subfolder path
                         subfolder_path = Path(*subfolder_parts) if subfolder_parts else Path()
-                        
+
                         # Combine with relative directory path (excluding filename)
                         relative_dir = relative_path.parent
                         if relative_dir != Path('.'):
-                            # File is in a subdirectory of source, preserve that structure
                             dest_file = self.destination_path / relative_dir / subfolder_path / actual_filename
                         else:
-                            # File is in root of source folder
                             dest_file = self.destination_path / subfolder_path / actual_filename
                 else:
                     # No delimiter in filename, use normal behavior
@@ -245,23 +217,21 @@ class FolderMonitorHandler(FileSystemEventHandler):
             else:
                 # Normal behavior: preserve folder structure
                 dest_file = self.destination_path / relative_path
-            
+
             if self.debug:
-                print(f"[DEBUG] Resolved destination: {dest_file}")
-            
+                log.append(f"[DEBUG] Resolved destination: {dest_file}")
+
             # Create destination directory if it doesn't exist
             dest_file.parent.mkdir(parents=True, exist_ok=True)
-            
+
             # Copy the file
             shutil.copy2(src_file, dest_file)
-            
+
             # Resize image if percentage was parsed from filename
             if resize_percentage is not None and dest_file.suffix.lower() in ['.png', '.jpg', '.jpeg']:
                 try:
-                    # Use ImageMagick to resize the image
-                    # Try 'magick' command first (ImageMagick 7+), fall back to 'convert' (ImageMagick 6)
                     resize_arg = f"{resize_percentage}%"
-                    
+
                     # Try ImageMagick 7+ syntax first
                     try:
                         result = subprocess.run(
@@ -271,7 +241,7 @@ class FolderMonitorHandler(FileSystemEventHandler):
                             timeout=30
                         )
                         if result.returncode == 0:
-                            print(f"  Resized to {resize_percentage}%")
+                            log.append(f"  Resized to {resize_percentage}%")
                         else:
                             raise subprocess.CalledProcessError(result.returncode, 'magick')
                     except (FileNotFoundError, subprocess.CalledProcessError):
@@ -283,46 +253,45 @@ class FolderMonitorHandler(FileSystemEventHandler):
                             timeout=30
                         )
                         if result.returncode == 0:
-                            print(f"  Resized to {resize_percentage}%")
+                            log.append(f"  Resized to {resize_percentage}%")
                         else:
-                            print(f"{Colors.YELLOW}  Warning: Failed to resize image{Colors.RESET}")
+                            log.append(f"{Colors.YELLOW}  Warning: Failed to resize image{Colors.RESET}")
                 except FileNotFoundError:
-                    print(f"{Colors.YELLOW}  Warning: ImageMagick not found. Please install ImageMagick to use resize feature.{Colors.RESET}")
+                    log.append(f"{Colors.YELLOW}  Warning: ImageMagick not found. Please install ImageMagick to use resize feature.{Colors.RESET}")
                 except subprocess.TimeoutExpired:
-                    print(f"{Colors.YELLOW}  Warning: Image resize timeout{Colors.RESET}")
+                    log.append(f"{Colors.YELLOW}  Warning: Image resize timeout{Colors.RESET}")
                 except Exception as e:
-                    print(f"{Colors.YELLOW}  Warning: Failed to resize image: {str(e)}{Colors.RESET}")
-            
+                    log.append(f"{Colors.YELLOW}  Warning: Failed to resize image: {str(e)}{Colors.RESET}")
+
             # Compress PNG files if enabled (TinyPNG-like multi-pass approach)
             if self.compress_png and src_file.suffix.lower() == '.png' and not skip_compression_for_file:
                 try:
                     # Get original file size for comparison
                     original_size = dest_file.stat().st_size
                     pngquant_success = False
-                    
+
                     if self.debug:
-                        print(f"\n[DEBUG] Starting compression for {relative_path}")
-                        print(f"[DEBUG] Original size: {original_size:,} bytes")
-                    
+                        log.append(f"[DEBUG] Starting compression for {relative_path}")
+                        log.append(f"[DEBUG] Original size: {original_size:,} bytes")
+
                     # PASS 1: pngquant - prioritize quality over compression
                     try:
                         if self.debug:
-                            print(f"[DEBUG] Running pngquant...")
-                        
-                        # High-quality settings: Prioritize visual fidelity, target ~40-50% reduction
+                            log.append(f"[DEBUG] Running pngquant...")
+
                         pngquant_command = [
                             self.pngquant_path,
-                            '--force',              # Overwrite existing files
-                            '--ext', '.png',        # Replace original file
-                            '--quality', '90-100',  # Very high quality - preserve maximum visual fidelity
-                            '--speed', '1',         # Best quality algorithm
-                            '--strip',              # Remove metadata (small gain, no quality loss)
+                            '--force',
+                            '--ext', '.png',
+                            '--quality', '90-100',
+                            '--speed', '1',
+                            '--strip',
                             str(dest_file)
                         ]
-                        
+
                         if self.debug:
-                            print(f"[DEBUG] Command: {' '.join(pngquant_command)}")
-                        
+                            log.append(f"[DEBUG] Command: {' '.join(pngquant_command)}")
+
                         result = subprocess.run(
                             pngquant_command,
                             capture_output=True,
@@ -330,60 +299,57 @@ class FolderMonitorHandler(FileSystemEventHandler):
                             timeout=90
                         )
                         pngquant_success = (result.returncode == 0)
-                        
+
                         if self.debug:
                             if pngquant_success:
                                 size_after_pngquant = dest_file.stat().st_size
                                 pngquant_reduction = ((original_size - size_after_pngquant) / original_size * 100)
-                                print(f"[DEBUG] pngquant SUCCESS: {size_after_pngquant:,} bytes ({pngquant_reduction:.1f}% reduction)")
+                                log.append(f"[DEBUG] pngquant SUCCESS: {size_after_pngquant:,} bytes ({pngquant_reduction:.1f}% reduction)")
                             else:
-                                print(f"[DEBUG] pngquant FAILED: return code {result.returncode}")
+                                log.append(f"[DEBUG] pngquant FAILED: return code {result.returncode}")
                                 if result.stderr:
-                                    print(f"[DEBUG] Error output: {result.stderr}")
-                                    
+                                    log.append(f"[DEBUG] Error output: {result.stderr}")
+
                     except FileNotFoundError:
                         try:
                             display_path = dest_file.relative_to(self.destination_path)
                         except ValueError:
                             display_path = dest_file
-                        print(f"  Copied to: {display_path}")
-                        print(f"{Colors.YELLOW}  Compression: Failed (pngquant not found){Colors.RESET}")
-                        print(f"  Install pngquant: https://pngquant.org/")
+                        log.append(f"  Copied to: {display_path}")
+                        log.append(f"{Colors.YELLOW}  Compression: Failed (pngquant not found){Colors.RESET}")
+                        log.append(f"  Install pngquant: https://pngquant.org/")
                         self.compress_png = False
                         pngquant_success = False
-                    
-                    # PASS 2: OptiPNG/AdvPNG for lossless optimization (TinyPNG does this too)
+
+                    # PASS 2: OptiPNG/AdvPNG for lossless optimization
                     if pngquant_success:
                         size_before_optipng = dest_file.stat().st_size
-                        optipng_success = False
-                        
+
                         if self.debug:
-                            print(f"[DEBUG] Running OptiPNG...")
-                        
-                        # Try OptiPNG first (more common)
+                            log.append(f"[DEBUG] Running OptiPNG...")
+
                         try:
                             optipng_result = subprocess.run(
                                 [self.optipng_path, '-o7', '-zm1-9', '-strip', 'all', str(dest_file)],
                                 capture_output=True,
                                 text=True,
                                 timeout=60,
-                                check=False  # Don't raise on non-zero exit
+                                check=False
                             )
                             optipng_success = (optipng_result.returncode == 0)
-                            
+
                             if self.debug:
                                 if optipng_success:
                                     size_after_optipng = dest_file.stat().st_size
                                     optipng_reduction = ((size_before_optipng - size_after_optipng) / size_before_optipng * 100)
-                                    print(f"[DEBUG] OptiPNG SUCCESS: {size_after_optipng:,} bytes ({optipng_reduction:.1f}% additional reduction)")
+                                    log.append(f"[DEBUG] OptiPNG SUCCESS: {size_after_optipng:,} bytes ({optipng_reduction:.1f}% additional reduction)")
                                 else:
-                                    print(f"[DEBUG] OptiPNG FAILED: return code {optipng_result.returncode}")
-                                    
+                                    log.append(f"[DEBUG] OptiPNG FAILED: return code {optipng_result.returncode}")
+
                         except FileNotFoundError:
                             if self.debug:
-                                print(f"[DEBUG] OptiPNG not found, trying AdvPNG...")
-                            
-                            # OptiPNG not found, try advpng as alternative
+                                log.append(f"[DEBUG] OptiPNG not found, trying AdvPNG...")
+
                             try:
                                 advpng_result = subprocess.run(
                                     ['advpng', '-z', '-4', str(dest_file)],
@@ -392,58 +358,60 @@ class FolderMonitorHandler(FileSystemEventHandler):
                                     timeout=60,
                                     check=False
                                 )
-                                
+
                                 if self.debug:
                                     if advpng_result.returncode == 0:
                                         size_after_advpng = dest_file.stat().st_size
                                         advpng_reduction = ((size_before_optipng - size_after_advpng) / size_before_optipng * 100)
-                                        print(f"[DEBUG] AdvPNG SUCCESS: {size_after_advpng:,} bytes ({advpng_reduction:.1f}% additional reduction)")
+                                        log.append(f"[DEBUG] AdvPNG SUCCESS: {size_after_advpng:,} bytes ({advpng_reduction:.1f}% additional reduction)")
                                     else:
-                                        print(f"[DEBUG] AdvPNG FAILED: return code {advpng_result.returncode}")
-                                        
+                                        log.append(f"[DEBUG] AdvPNG FAILED: return code {advpng_result.returncode}")
+
                             except FileNotFoundError:
                                 if self.debug:
-                                    print(f"[DEBUG] AdvPNG not found - skipping pass 2 optimization")
-                    
+                                    log.append(f"[DEBUG] AdvPNG not found - skipping pass 2 optimization")
+
                     # Calculate final compression ratio and display results
                     try:
                         display_path = dest_file.relative_to(self.destination_path)
                     except ValueError:
                         display_path = dest_file
-                    print(f"  Copied to: {display_path}")
-                    
+                    log.append(f"  Copied to: {display_path}")
+
                     if pngquant_success:
                         compressed_size = dest_file.stat().st_size
                         reduction = ((original_size - compressed_size) / original_size * 100)
-                        
+
                         if self.debug:
-                            print(f"[DEBUG] FINAL: {compressed_size:,} bytes (total {reduction:.1f}% reduction)\n")
-                        
+                            log.append(f"[DEBUG] FINAL: {compressed_size:,} bytes (total {reduction:.1f}% reduction)")
+
                         if reduction > 0:
-                            print(f"  Compression: {Colors.GREEN}✓ Success ({reduction:.1f}% reduction){Colors.RESET}")
+                            log.append(f"  Compression: {Colors.GREEN}✓ Success ({reduction:.1f}% reduction){Colors.RESET}")
                         else:
-                            print(f"  Compression: Skipped (already optimized)")
+                            log.append(f"  Compression: Skipped (already optimized)")
                     else:
-                        print(f"  Compression: Skipped (quality threshold not met)")
-                        print(f"  {Colors.GREEN}✓ Success{Colors.RESET}")
-                        
+                        log.append(f"  Compression: Skipped (quality threshold not met)")
+                        log.append(f"  {Colors.GREEN}✓ Success{Colors.RESET}")
+
                 except subprocess.TimeoutExpired:
-                    print(f"{Colors.YELLOW}  Compression: Timeout{Colors.RESET}")
+                    log.append(f"{Colors.YELLOW}  Compression: Timeout{Colors.RESET}")
                 except Exception as e:
-                    print(f"{Colors.YELLOW}  Compression: Error{Colors.RESET}")
+                    log.append(f"{Colors.YELLOW}  Compression: Error{Colors.RESET}")
             else:
                 # Non-PNG file or compression disabled
                 try:
                     display_path = dest_file.relative_to(self.destination_path)
                 except ValueError:
                     display_path = dest_file
-                print(f"  Copied to: {display_path}")
+                log.append(f"  Copied to: {display_path}")
                 if skip_compression_for_file and src_file.suffix.lower() == '.png':
-                    print(f"  Compression: Skipped (prefix detected)")
-                print(f"  {Colors.GREEN}✓ Success{Colors.RESET}")
-            
+                    log.append(f"  Compression: Skipped (prefix detected)")
+                log.append(f"  {Colors.GREEN}✓ Success{Colors.RESET}")
+
         except Exception as e:
-            print(f"  {Colors.RED}✗ Failed: {str(e)}{Colors.RESET}")
+            log.append(f"  {Colors.RED}✗ Failed: {str(e)}{Colors.RESET}")
+
+        self._flush_log(log)
     
     def _schedule_copy(self, src_path, event_type):
         """Debounce file events: reset timer on each event, process once after quiet period."""
@@ -616,7 +584,6 @@ def main():
     observer = Observer()
     ignore_extensions = config.get('ignore_extensions', [])
     ignore_files_without_extension = config.get('ignore_files_without_extension', False)
-    processing_delay = config.get('processing_delay', 0)
     compress_png = config.get('compress_png', False)
     pngquant_path = config.get('pngquant_path', None)
     optipng_path = config.get('optipng_path', None)
@@ -627,11 +594,12 @@ def main():
     skip_compression_prefix_enabled = config.get('skip_compression_prefix_enabled', False)
     skip_compression_prefix = config.get('skip_compression_prefix', '!')
     path_macros = config.get('path_macros', {})
+    cooldown = config.get('cooldown', 5.0)
     handlers = []
     for item in source_folders:
         source_path = Path(item['path'])
         label = item.get('label', None)
-        event_handler = FolderMonitorHandler(source_path, destination_folder, label, ignore_extensions, ignore_files_without_extension, processing_delay, compress_png, pngquant_path, optipng_path, debug, parse_filename_paths, filename_path_delimiter, parse_resize_from_filename, skip_compression_prefix_enabled, skip_compression_prefix, path_macros)
+        event_handler = FolderMonitorHandler(source_path, destination_folder, label, ignore_extensions, ignore_files_without_extension, compress_png, pngquant_path, optipng_path, debug, parse_filename_paths, filename_path_delimiter, parse_resize_from_filename, skip_compression_prefix_enabled, skip_compression_prefix, path_macros, cooldown)
         observer.schedule(event_handler, str(source_path), recursive=True)
         handlers.append(event_handler)
     

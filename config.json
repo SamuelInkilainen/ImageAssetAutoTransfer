@@ -9,7 +9,7 @@
     ".bak",
     ".bak.png"], 
   "ignore_files_without_extension": true,
-  "processing_delay": 0.0,
+  "cooldown": 3.0,
   "compress_png": true,
   "parse_filename_paths": true,
   "filename_path_delimiter": "§",

@@ -18,7 +18,7 @@ A Python script that monitors specified folders (including subfolders) for file 
 - **Automatic Scale Cleanup**: Automatically deletes old scale variations when saving new ones (e.g., saving `50% file.png` deletes `75% file.png`)
 - **Filename Path Parsing**: Extract subfolder paths from filenames using a delimiter (e.g., `folder§subfolder§file.png`)
 - **Path Macros**: Define shorthand macros that reroute files to different destination paths (e.g., `ui§button.png` → a completely different folder)
-- **File Stabilization**: Smart waiting that ensures complete files are transferred, even with complex save operations
+- **Event Deduplication**: Smart debounce and cooldown system prevents duplicate processing from rapid filesystem events
 - **Runtime Debug Toggle**: Toggle debug output on/off while running without restarting the script
 - **Cross-platform**: Works on Windows, macOS, and Linux
 - **Executable Version**: Can be built as a standalone executable (no Python required)
@@ -85,7 +85,7 @@ Edit the `config.json` file to configure the script for your needs.
   "destination_folder": "C:\\Users\\You\\GameProject\\Resources",
   "ignore_extensions": [".txt", ".bak", ".bak.png"],
   "ignore_files_without_extension": true,
-  "processing_delay": 0.25,
+  "cooldown": 5.0,
   "compress_png": true,
   "parse_filename_paths": true,
   "filename_path_delimiter": "§",
@@ -108,7 +108,7 @@ Edit the `config.json` file to configure the script for your needs.
 | `destination_folder` | string | Yes | Where files will be copied to |
 | `ignore_extensions` | array | No | File extensions to ignore (e.g., `[".txt", ".bak.png"]`) |
 | `ignore_files_without_extension` | boolean | No | Ignore files without file extensions (e.g., temp files) (default: false) |
-| `processing_delay` | number | No | Poll interval in seconds for file stabilization (waits until file stops changing) (default: 0) |
+| `cooldown` | number | No | Seconds to ignore duplicate events for the same file after processing (default: 5.0) |
 | `compress_png` | boolean | No | Enable high-quality PNG compression (default: false) |
 | `parse_filename_paths` | boolean | No | Extract folder paths from filenames (default: false) |
 | `filename_path_delimiter` | string | No | Delimiter for filename paths (default: "§") |
@@ -301,38 +301,31 @@ Temporary files typically have no file extension. Enable this to skip them:
 }
 ```
 
-**2. Processing Delay with File Stabilization**
+**2. Event Deduplication (Debounce + Cooldown)**
 
-Wait for files to stabilize before processing, allowing the software to complete its save operations:
+The script automatically deduplicates filesystem events. Applications like Photoshop generate multiple events per save (modify → delete → create). The built-in debounce (1 second) and cooldown system ensure each file is only processed once per save.
 
 ```json
 {
-  "processing_delay": 0.25
+  "cooldown": 5.0
 }
 ```
 
-- The script polls the file every `processing_delay` seconds
-- Processing begins only when the file's size and modification time stop changing
-- Automatically handles complex save operations (modify → delete → recreate → write)
-- Maximum wait time: ~10 seconds (then processes anyway)
-- Recommended value: `0.25` seconds for responsive monitoring
-
-**How it works:**
-1. File change detected → Start monitoring
-2. Check file size and modification time every 0.25s
-3. When two consecutive checks match → File is stable, begin processing
-4. If file disappears during monitoring → Skip (was a temp file)
+- Events for the same file are coalesced using a 1-second debounce window
+- After processing, additional events for the same file are ignored for `cooldown` seconds
+- Default: 5 seconds (works well with Photoshop and most design tools)
+- Increase if your tool generates delayed follow-up events
 
 **Recommended Configuration for Photoshop/Design Tools:**
 
 ```json
 {
   "ignore_files_without_extension": true,
-  "processing_delay": 0.25
+  "cooldown": 5.0
 }
 ```
 
-This combination ensures temporary files are filtered out and the file stabilization system waits for the complete file to be saved before processing.
+This combination ensures temporary files are filtered out and each save is processed exactly once.
 
 ## Troubleshooting
 
