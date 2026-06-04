@@ -67,6 +67,11 @@ class FolderMonitorHandler(FileSystemEventHandler):
         self.skip_compression_prefix_enabled = skip_compression_prefix_enabled
         self.skip_compression_prefix = skip_compression_prefix
         self.path_macros = path_macros or {}
+        self._debounce_timers = {}  # Per-file debounce timers
+        self._debounce_lock = threading.Lock()
+        self._debounce_delay = 1.0  # Seconds to wait before processing after last event
+        self._recently_processed = {}  # key -> timestamp of last processing completion
+        self._cooldown = 3.0  # Seconds to ignore duplicate events after processing a file
         
         # Show configuration info on startup
         print(f"[{self.label}]")
@@ -106,7 +111,14 @@ class FolderMonitorHandler(FileSystemEventHandler):
             if self.processing_delay > 0:
                 if self.debug:
                     print(f"  Waiting for file to stabilize...")
-                prev_stat = None
+                # Initialize prev_stat with current file state so the first comparison is meaningful
+                try:
+                    init_stat = src_file.stat()
+                    prev_stat = (init_stat.st_size, init_stat.st_mtime)
+                except OSError:
+                    if self.debug:
+                        print(f"  File became inaccessible - skipping")
+                    return
                 max_attempts = int(10 / self.processing_delay)  # Max ~10 seconds
                 for attempt in range(max_attempts):
                     time.sleep(self.processing_delay)
@@ -433,19 +445,44 @@ class FolderMonitorHandler(FileSystemEventHandler):
         except Exception as e:
             print(f"  {Colors.RED}✗ Failed: {str(e)}{Colors.RESET}")
     
+    def _schedule_copy(self, src_path, event_type):
+        """Debounce file events: reset timer on each event, process once after quiet period."""
+        key = str(Path(src_path).resolve())
+        with self._debounce_lock:
+            # Skip if this file was recently processed (cooldown guard)
+            last_done = self._recently_processed.get(key)
+            if last_done is not None and (time.time() - last_done) < self._cooldown:
+                if self.debug:
+                    print(f"[{self.label}] Cooldown active for: {Path(src_path).name} - skipping")
+                return
+            if key in self._debounce_timers:
+                self._debounce_timers[key].cancel()
+                if self.debug:
+                    print(f"[{self.label}] Debounce reset for: {Path(src_path).name}")
+            timer = threading.Timer(self._debounce_delay, self._debounced_copy, args=[src_path, key])
+            timer.daemon = True
+            self._debounce_timers[key] = timer
+            timer.start()
+            if self.debug:
+                print(f"[{self.label}] {event_type}: {src_path} (debounce {self._debounce_delay}s)")
+    
+    def _debounced_copy(self, src_path, key):
+        """Called after debounce delay expires - actually process the file."""
+        with self._debounce_lock:
+            self._debounce_timers.pop(key, None)
+        self.copy_file(src_path)
+        with self._debounce_lock:
+            self._recently_processed[key] = time.time()
+    
     def on_modified(self, event):
         """Called when a file is modified."""
         if not event.is_directory:
-            if self.debug:
-                print(f"[{self.label}] Modified: {event.src_path}")
-            self.copy_file(event.src_path)
+            self._schedule_copy(event.src_path, "Modified")
     
     def on_created(self, event):
         """Called when a file is created."""
         if not event.is_directory:
-            if self.debug:
-                print(f"[{self.label}] Created: {event.src_path}")
-            self.copy_file(event.src_path)
+            self._schedule_copy(event.src_path, "Created")
 
 def load_config():
     """Load configuration from config.json file."""

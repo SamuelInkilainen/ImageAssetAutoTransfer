@@ -1,14 +1,15 @@
 {
   "source_folders": [
-      "C:\\Users\\SamuelInkilainen\\Documents\\Work_Local\\Crystal_cavern\\monitored_assets"
+      "C:/Users/SamuelInkilainen/Documents/Work_Local/Crystal_cavern/monitored_assets",
+      "C:/Users/SamuelInkilainen/Documents/Work_Local/HCR2 - 10th anniversary/10year-anniversary-level1-assets"
   ],
-  "destination_folder": "C:\\Users\\SamuelInkilainen\\Documents\\hcr2\\ResourcesLocal\\textures",
+  "destination_folder": "C:/Users/SamuelInkilainen/Documents/hcr2/ResourcesLocal/textures",
   "ignore_extensions": [
     ".txt", 
     ".bak",
     ".bak.png"], 
   "ignore_files_without_extension": true,
-  "processing_delay": 0.25,
+  "processing_delay": 0.0,
   "compress_png": true,
   "parse_filename_paths": true,
   "filename_path_delimiter": "§",
@@ -16,8 +17,8 @@
   "skip_compression_prefix_enabled": true,
   "skip_compression_prefix": "#",
   "path_macros": {
-    "UI": "C:\\Users\\SamuelInkilainen\\Documents\\hcr2\\ResourcesLocal\\ui\\cocosstudio"
+    "UI": "C:/Users/SamuelInkilainen/Documents/hcr2/ResourcesLocal/ui/cocosstudio"
   },
-  "pngquant_path": "C:\\Users\\SamuelInkilainen\\Documents\\pngquant\\pngquant.exe",
+  "pngquant_path": "C:/Users/SamuelInkilainen/Documents/pngquant/pngquant.exe",
   "debug": false
 } 
