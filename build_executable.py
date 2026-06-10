@@ -60,16 +60,20 @@ if dist_folder.exists():
         
         # Create template config with example paths
         template_config = {
-            "source_folders": ["C:\\Path\\To\\Your\\Source\\Folder"],
-            "destination_folder": "C:\\Path\\To\\Your\\Destination\\Folder",
-            "ignore_extensions": config_data.get("ignore_extensions", [".txt", ".bak"]),
+            "source_folders": ["C:/path/to/your/source/folder"],
+            "destination_folder": "C:/path/to/your/destination/folder",
+            "ignore_extensions": config_data.get("ignore_extensions", [".txt", ".bak", ".bak.png"]),
             "ignore_files_without_extension": config_data.get("ignore_files_without_extension", True),
-            "processing_delay": config_data.get("processing_delay", 0.25),
-            "compress_png": config_data.get("compress_png", False),
-            "parse_filename_paths": config_data.get("parse_filename_paths", False),
+            "cooldown": config_data.get("cooldown", 3.0),
+            "compress_png": config_data.get("compress_png", True),
+            "parse_filename_paths": config_data.get("parse_filename_paths", True),
             "filename_path_delimiter": config_data.get("filename_path_delimiter", "§"),
-            "parse_resize_from_filename": config_data.get("parse_resize_from_filename", False),
-            "path_macros": config_data.get("path_macros", {}),
+            "parse_resize_from_filename": config_data.get("parse_resize_from_filename", True),
+            "skip_compression_prefix_enabled": config_data.get("skip_compression_prefix_enabled", True),
+            "skip_compression_prefix": config_data.get("skip_compression_prefix", "#"),
+            "path_macros": {
+                "UI": "C:/path/to/your/secondary/destination/folder"
+            },
             "debug": False
         }
         
