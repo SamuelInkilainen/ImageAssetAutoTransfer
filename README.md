@@ -64,6 +64,7 @@ The executable will be created in the `dist` folder. See [BUILD_INSTRUCTIONS.md]
 ## Configuration
 
 Edit the `config.json` file to configure the script for your needs.
+You can type `reload` to script cmd to reload the values from config json. Editing file paths requires a restart.
 
 ### Basic Configuration (Single Source)
 
