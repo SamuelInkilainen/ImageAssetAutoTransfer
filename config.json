@@ -1,8 +1,8 @@
 {
   "source_folders": [
-      "C:/path/to/your/source/folder"
+      "C:\\Users\\SamuelInkilainen\\Documents\\Work_Local\\Crystal_cavern\\monitored_assets"
   ],
-  "destination_folder": "C:/path/to/your/destination/folder",
+  "destination_folder": "C:\\Users\\SamuelInkilainen\\Documents\\hcr2\\ResourcesLocal\\textures",
   "ignore_extensions": [
     ".txt", 
     ".bak",
@@ -13,10 +13,14 @@
   "parse_filename_paths": true,
   "filename_path_delimiter": "§",
   "parse_resize_from_filename": true,
+  "resize_filter": "lanczos",
+  /* resize_filter options:
+    "mitchell" — good general-purpose filter - default
+    "catrom"  — Bicubic Sharper, crisper results when downscaling
+    "lanczos" — Windowed sinc, high quality, may ring on sharp edges
+  */
+  "resize_sharpen": true,
   "skip_compression_prefix_enabled": true,
   "skip_compression_prefix": "#",
-  "path_macros": {
-    "UI": "C:/path/to/your/secondary/destination/folder"
-  },
   "debug": false
 } 

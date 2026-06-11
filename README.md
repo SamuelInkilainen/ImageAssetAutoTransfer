@@ -102,6 +102,8 @@ Edit the `config.json` file to configure the script for your needs.
 
 ### Configuration Options
 
+> **Note:** `config.json` supports `//` line comments and `/* */` block comments (JSONC), so you can annotate your configuration or comment out alternative settings.
+
 | Option | Type | Required | Description |
 |--------|------|----------|-------------|
 | `source_folders` | array | Yes | List of folder paths to monitor |
@@ -113,6 +115,8 @@ Edit the `config.json` file to configure the script for your needs.
 | `parse_filename_paths` | boolean | No | Extract folder paths from filenames (default: false) |
 | `filename_path_delimiter` | string | No | Delimiter for filename paths (default: "§") |
 | `parse_resize_from_filename` | boolean | No | Parse resize percentage from filename (default: false) |
+| `resize_filter` | string | No | Resampling filter for image resize: `"mitchell"` (bicubic), `"catrom"` (bicubic sharper), or `"lanczos"` (windowed sinc) (default: "mitchell") |
+| `resize_sharpen` | boolean | No | Apply unsharp mask after resize for extra sharpness (default: false) |
 | `skip_compression_prefix_enabled` | boolean | No | Enable skip compression prefix feature (default: false) |
 | `skip_compression_prefix` | string | No | Prefix that disables compression for files (default: "!") |
 | `path_macros` | object | No | Dictionary of shorthand macros that reroute files to different absolute paths (default: {}) |

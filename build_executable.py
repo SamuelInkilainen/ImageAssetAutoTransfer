@@ -55,8 +55,31 @@ if dist_folder.exists():
     if config_template.exists():
         # Create a clean config template for distribution (remove personal paths)
         import json
+        import re as _re
+
+        def _strip_json_comments(text):
+            """Strip // and /* */ comments from JSONC text, preserving strings."""
+            result, i, n = [], 0, len(text)
+            while i < n:
+                if text[i] == '"':
+                    result.append('"')
+                    i += 1
+                    while i < n:
+                        ch = text[i]; result.append(ch); i += 1
+                        if ch == '\\' and i < n: result.append(text[i]); i += 1
+                        elif ch == '"': break
+                elif text[i] == '/' and i+1 < n and text[i+1] == '/':
+                    i += 2
+                    while i < n and text[i] != '\n': i += 1
+                elif text[i] == '/' and i+1 < n and text[i+1] == '*':
+                    i += 2
+                    while i < n and not (text[i] == '*' and i+1 < n and text[i+1] == '/'): i += 1
+                    i += 2
+                else: result.append(text[i]); i += 1
+            return ''.join(result)
+
         with open(config_template, 'r', encoding='utf-8') as f:
-            config_data = json.load(f)
+            config_data = json.loads(_strip_json_comments(f.read()))
         
         # Create template config with example paths
         template_config = {
@@ -69,6 +92,8 @@ if dist_folder.exists():
             "parse_filename_paths": config_data.get("parse_filename_paths", True),
             "filename_path_delimiter": config_data.get("filename_path_delimiter", "§"),
             "parse_resize_from_filename": config_data.get("parse_resize_from_filename", True),
+            "resize_filter": config_data.get("resize_filter", "mitchell"),
+            "resize_sharpen": config_data.get("resize_sharpen", False),
             "skip_compression_prefix_enabled": config_data.get("skip_compression_prefix_enabled", True),
             "skip_compression_prefix": config_data.get("skip_compression_prefix", "#"),
             "path_macros": {

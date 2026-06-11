@@ -9,6 +9,43 @@ from pathlib import Path
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
+
+def strip_json_comments(text):
+    """Strip // and /* */ comments from JSON text (JSONC), preserving strings."""
+    result = []
+    i = 0
+    n = len(text)
+    while i < n:
+        # Inside a string literal — copy until closing quote
+        if text[i] == '"':
+            result.append('"')
+            i += 1
+            while i < n:
+                ch = text[i]
+                result.append(ch)
+                i += 1
+                if ch == '\\' and i < n:
+                    result.append(text[i])
+                    i += 1
+                elif ch == '"':
+                    break
+        # Line comment
+        elif text[i] == '/' and i + 1 < n and text[i + 1] == '/':
+            i += 2
+            while i < n and text[i] != '\n':
+                i += 1
+        # Block comment
+        elif text[i] == '/' and i + 1 < n and text[i + 1] == '*':
+            i += 2
+            while i < n and not (text[i] == '*' and i + 1 < n and text[i + 1] == '/'):
+                i += 1
+            i += 2  # skip */
+        else:
+            result.append(text[i])
+            i += 1
+    return ''.join(result)
+
+
 # ANSI color codes for terminal output
 class Colors:
     RED = '\033[91m'
@@ -19,7 +56,9 @@ class Colors:
 class FolderMonitorHandler(FileSystemEventHandler):
     """Handles file system events and copies changed files to destination."""
     
-    def __init__(self, source_path, destination_path, label=None, ignore_extensions=None, ignore_files_without_extension=False, compress_png=False, pngquant_path=None, optipng_path=None, debug=False, parse_filename_paths=False, filename_path_delimiter='§', parse_resize_from_filename=False, skip_compression_prefix_enabled=False, skip_compression_prefix='!', path_macros=None, cooldown=5.0):
+    VALID_RESIZE_FILTERS = ['mitchell', 'catrom', 'lanczos']
+
+    def __init__(self, source_path, destination_path, label=None, ignore_extensions=None, ignore_files_without_extension=False, compress_png=False, pngquant_path=None, optipng_path=None, debug=False, parse_filename_paths=False, filename_path_delimiter='§', parse_resize_from_filename=False, skip_compression_prefix_enabled=False, skip_compression_prefix='!', path_macros=None, cooldown=5.0, resize_filter='mitchell', resize_sharpen=False):
         self.source_path = Path(source_path).resolve()
         self.destination_path = Path(destination_path).resolve()
         self.label = label or str(self.source_path)
@@ -63,6 +102,11 @@ class FolderMonitorHandler(FileSystemEventHandler):
         self.parse_filename_paths = parse_filename_paths
         self.filename_path_delimiter = filename_path_delimiter
         self.parse_resize_from_filename = parse_resize_from_filename
+        self.resize_filter = resize_filter.lower() if resize_filter else 'mitchell'
+        if self.resize_filter not in self.VALID_RESIZE_FILTERS:
+            print(f"{Colors.YELLOW}Warning: Unknown resize_filter '{resize_filter}', falling back to 'mitchell'{Colors.RESET}")
+            self.resize_filter = 'mitchell'
+        self.resize_sharpen = resize_sharpen
         self.skip_compression_prefix_enabled = skip_compression_prefix_enabled
         self.skip_compression_prefix = skip_compression_prefix
         self.path_macros = path_macros or {}
@@ -87,6 +131,8 @@ class FolderMonitorHandler(FileSystemEventHandler):
             print(f"  Filename Path Parsing: Enabled (delimiter: '{self.filename_path_delimiter}')")
         if self.parse_resize_from_filename:
             print(f"  Resize from Filename: Enabled")
+            sharpen_label = ' + sharpen' if self.resize_sharpen else ''
+            print(f"  Resize Filter: {self.resize_filter}{sharpen_label}")
         if self.skip_compression_prefix_enabled:
             print(f"  Skip Compression Prefix: Enabled (prefix: '{self.skip_compression_prefix}')")
         if self.path_macros:
@@ -231,29 +277,37 @@ class FolderMonitorHandler(FileSystemEventHandler):
             if resize_percentage is not None and dest_file.suffix.lower() in ['.png', '.jpg', '.jpeg']:
                 try:
                     resize_arg = f"{resize_percentage}%"
+                    filter_name = self.resize_filter.title()  # mitchell -> Mitchell
+                    resize_label = f"{resize_percentage}% ({self.resize_filter})"
+
+                    # Build common args: -filter <filter> -resize <pct>% [-unsharp ...]
+                    filter_args = ['-filter', filter_name, '-resize', resize_arg]
+                    if self.resize_sharpen:
+                        filter_args += ['-unsharp', '0x0.75+0.75+0.008']
+                        resize_label += " + sharpen"
 
                     # Try ImageMagick 7+ syntax first
                     try:
                         result = subprocess.run(
-                            ['magick', str(dest_file), '-resize', resize_arg, str(dest_file)],
+                            ['magick', str(dest_file)] + filter_args + [str(dest_file)],
                             capture_output=True,
                             text=True,
                             timeout=30
                         )
                         if result.returncode == 0:
-                            log.append(f"  Resized to {resize_percentage}%")
+                            log.append(f"  Resized to {resize_label}")
                         else:
                             raise subprocess.CalledProcessError(result.returncode, 'magick')
                     except (FileNotFoundError, subprocess.CalledProcessError):
                         # Fall back to ImageMagick 6 'convert' command
                         result = subprocess.run(
-                            ['convert', str(dest_file), '-resize', resize_arg, str(dest_file)],
+                            ['convert', str(dest_file)] + filter_args + [str(dest_file)],
                             capture_output=True,
                             text=True,
                             timeout=30
                         )
                         if result.returncode == 0:
-                            log.append(f"  Resized to {resize_percentage}%")
+                            log.append(f"  Resized to {resize_label}")
                         else:
                             log.append(f"{Colors.YELLOW}  Warning: Failed to resize image{Colors.RESET}")
                 except FileNotFoundError:
@@ -452,51 +506,104 @@ class FolderMonitorHandler(FileSystemEventHandler):
         if not event.is_directory:
             self._schedule_copy(event.src_path, "Created")
 
-def load_config():
-    """Load configuration from config.json file."""
-    # When running as executable, use the exe's directory
-    # When running as script, use the script's directory
+def is_placeholder_path(path_str):
+    """Check if a path is a default placeholder from the config template."""
+    return "path/to/your" in str(path_str).replace("\\", "/").lower()
+
+def get_config_path():
+    """Get the path to config.json based on how the script is running."""
     if getattr(sys, 'frozen', False):
-        # Running as compiled executable
         application_path = Path(sys.executable).parent
     else:
-        # Running as script
         application_path = Path(__file__).parent
-    
-    config_path = application_path / "config.json"
+    return application_path / "config.json"
+
+def print_path_format_help():
+    """Print path format guidance for the user."""
+    print(f"\n{Colors.YELLOW}Path format reminder:{Colors.RESET}")
+    print(f"  In JSON, use double backslashes (\\\\) or forward slashes (/) as path delimiters.")
+    print(f"  A single backslash (\\) is a JSON escape character and will cause errors.")
+    print(f"  Examples:")
+    print(f'    "C:\\\\Users\\\\YourName\\\\Documents\\\\folder"')
+    print(f'    "C:/Users/YourName/Documents/folder"')
+
+def validate_config_paths(config):
+    """Validate all folder paths in the config. Returns a list of error messages."""
+    errors = []
+
+    # Check destination_folder
+    dest = config.get('destination_folder', '')
+    if is_placeholder_path(dest):
+        errors.append(f"  destination_folder: \"{dest}\" is still set to the default placeholder")
+    else:
+        dest_path = Path(dest)
+        # Destination is auto-created, but check if the drive/root is valid
+        try:
+            dest_resolved = dest_path.resolve()
+            # Check that at least the drive/root exists
+            if not dest_resolved.anchor:
+                errors.append(f"  destination_folder: \"{dest}\" is not a valid path")
+        except Exception:
+            errors.append(f"  destination_folder: \"{dest}\" is not a valid path")
+
+    # Check source folders
+    source_folders = []
+    if 'source_folders' in config:
+        for i, item in enumerate(config['source_folders']):
+            path_str = item['path'] if isinstance(item, dict) else item
+            label = item.get('label', f'source_folders[{i}]') if isinstance(item, dict) else f'source_folders[{i}]'
+            source_folders.append((label, path_str))
+    elif 'source_folder' in config:
+        source_folders.append(('source_folder', config['source_folder']))
+
+    for label, path_str in source_folders:
+        if is_placeholder_path(path_str):
+            errors.append(f"  {label}: \"{path_str}\" is still set to the default placeholder")
+        else:
+            source_path = Path(path_str)
+            if not source_path.exists():
+                errors.append(f"  {label}: \"{path_str}\" does not exist")
+            elif not source_path.is_dir():
+                errors.append(f"  {label}: \"{path_str}\" is not a directory")
+
+    # Check path_macros
+    path_macros = config.get('path_macros', {})
+    for macro_name, macro_path in path_macros.items():
+        if is_placeholder_path(macro_path):
+            errors.append(f"  path_macros[\"{macro_name}\"]: \"{macro_path}\" is still set to the default placeholder")
+        else:
+            macro_dir = Path(macro_path)
+            if not macro_dir.exists():
+                errors.append(f"  path_macros[\"{macro_name}\"]: \"{macro_path}\" does not exist")
+            elif not macro_dir.is_dir():
+                errors.append(f"  path_macros[\"{macro_name}\"]: \"{macro_path}\" is not a directory")
+
+    return errors
+
+def load_config():
+    """Load configuration from config.json file. Returns config dict or None on error."""
+    config_path = get_config_path()
     
     if not config_path.exists():
         print(f"{Colors.RED}Error: config.json not found!{Colors.RESET}")
         print(f"Expected location: {config_path}")
         print(f"\nPlease create a config.json file with your source and destination folders.")
         print(f"See the README.md for configuration examples.")
-        
-        # Pause if running as executable
-        if getattr(sys, 'frozen', False):
-            input("\nPress Enter to close...")
         return None
     
     try:
         with open(config_path, 'r', encoding='utf-8') as f:
-            config = json.load(f)
+            config = json.loads(strip_json_comments(f.read()))
         
         # Validate required fields - support both single and multiple source folders
         if 'destination_folder' not in config:
             print(f"{Colors.RED}Error: config.json must contain 'destination_folder'{Colors.RESET}")
             print(f"\nPlease add a destination_folder to your config.json")
-            
-            # Pause if running as executable
-            if getattr(sys, 'frozen', False):
-                input("\nPress Enter to close...")
             return None
         
         if 'source_folder' not in config and 'source_folders' not in config:
             print(f"{Colors.RED}Error: config.json must contain either 'source_folder' or 'source_folders'{Colors.RESET}")
             print(f"\nPlease add a source folder to your config.json")
-            
-            # Pause if running as executable
-            if getattr(sys, 'frozen', False):
-                input("\nPress Enter to close...")
             return None
         
         return config
@@ -505,17 +612,9 @@ def load_config():
         print(f"{Colors.RED}Error parsing config.json: {str(e)}{Colors.RESET}")
         print(f"\nPlease check your config.json for syntax errors.")
         print(f"Make sure all quotes and commas are correct.")
-        
-        # Pause if running as executable
-        if getattr(sys, 'frozen', False):
-            input("\nPress Enter to close...")
         return None
     except Exception as e:
         print(f"{Colors.RED}Error reading config.json: {str(e)}{Colors.RESET}")
-        
-        # Pause if running as executable
-        if getattr(sys, 'frozen', False):
-            input("\nPress Enter to close...")
         return None
 
 def main():
@@ -524,16 +623,49 @@ def main():
     print("Folder Monitor - Starting...")
     print("=" * 50)
     
+    config_path = get_config_path()
+    
     # Show config file location
     if getattr(sys, 'frozen', False):
-        config_location = Path(sys.executable).parent / "config.json"
         print(f"\n{Colors.YELLOW}Configure your settings in: config.json{Colors.RESET}")
         print(f"(Located next to FolderMonitor.exe)\n")
     
-    # Load configuration
-    config = load_config()
-    if not config:
-        return
+    # Config loading and validation loop — allows user to fix config.json and retry
+    while True:
+        config = load_config()
+        if not config:
+            print(f"\n{Colors.YELLOW}Config file location: {config_path}{Colors.RESET}")
+            print_path_format_help()
+            try:
+                input(f"\nFix the issue in config.json, then press Enter to reload (Ctrl+C to exit)...")
+            except KeyboardInterrupt:
+                print("\nExiting.")
+                return
+            print("\n" + "=" * 50)
+            print("Reloading config.json...")
+            print("=" * 50 + "\n")
+            continue
+        
+        # Validate all folder paths
+        path_errors = validate_config_paths(config)
+        if path_errors:
+            print(f"\n{Colors.RED}Invalid folder paths found in config.json:{Colors.RESET}")
+            for err in path_errors:
+                print(f"{Colors.RED}{err}{Colors.RESET}")
+            print(f"\n{Colors.YELLOW}Config file location: {config_path}{Colors.RESET}")
+            print_path_format_help()
+            try:
+                input(f"\nFix the paths in config.json, then press Enter to reload (Ctrl+C to exit)...")
+            except KeyboardInterrupt:
+                print("\nExiting.")
+                return
+            print("\n" + "=" * 50)
+            print("Reloading config.json...")
+            print("=" * 50 + "\n")
+            continue
+        
+        # Config is valid, break out of retry loop
+        break
     
     destination_folder = Path(config['destination_folder'])
     
@@ -554,32 +686,6 @@ def main():
         # Single source folder (backward compatibility)
         source_folders.append({'path': config['source_folder']})
     
-    # Validate all source paths
-    for item in source_folders:
-        source_path = Path(item['path'])
-        if not source_path.exists():
-            print(f"{Colors.RED}Error: Source folder does not exist: {source_path}{Colors.RESET}")
-            print(f"\nPlease update the source folder path in config.json")
-            if getattr(sys, 'frozen', False):
-                config_location = Path(sys.executable).parent / "config.json"
-                print(f"Config file location: {config_location}")
-            
-            # Pause if running as executable
-            if getattr(sys, 'frozen', False):
-                input("\nPress Enter to close...")
-            return
-        if not source_path.is_dir():
-            print(f"{Colors.RED}Error: Source path is not a directory: {source_path}{Colors.RESET}")
-            print(f"\nPlease update the source folder path in config.json")
-            if getattr(sys, 'frozen', False):
-                config_location = Path(sys.executable).parent / "config.json"
-                print(f"Config file location: {config_location}")
-            
-            # Pause if running as executable
-            if getattr(sys, 'frozen', False):
-                input("\nPress Enter to close...")
-            return
-    
     # Set up the observer with all source folders
     observer = Observer()
     ignore_extensions = config.get('ignore_extensions', [])
@@ -591,6 +697,8 @@ def main():
     parse_filename_paths = config.get('parse_filename_paths', False)
     filename_path_delimiter = config.get('filename_path_delimiter', '§')
     parse_resize_from_filename = config.get('parse_resize_from_filename', False)
+    resize_filter = config.get('resize_filter', 'mitchell')
+    resize_sharpen = config.get('resize_sharpen', False)
     skip_compression_prefix_enabled = config.get('skip_compression_prefix_enabled', False)
     skip_compression_prefix = config.get('skip_compression_prefix', '!')
     path_macros = config.get('path_macros', {})
@@ -599,14 +707,14 @@ def main():
     for item in source_folders:
         source_path = Path(item['path'])
         label = item.get('label', None)
-        event_handler = FolderMonitorHandler(source_path, destination_folder, label, ignore_extensions, ignore_files_without_extension, compress_png, pngquant_path, optipng_path, debug, parse_filename_paths, filename_path_delimiter, parse_resize_from_filename, skip_compression_prefix_enabled, skip_compression_prefix, path_macros, cooldown)
+        event_handler = FolderMonitorHandler(source_path, destination_folder, label, ignore_extensions, ignore_files_without_extension, compress_png, pngquant_path, optipng_path, debug, parse_filename_paths, filename_path_delimiter, parse_resize_from_filename, skip_compression_prefix_enabled, skip_compression_prefix, path_macros, cooldown, resize_filter, resize_sharpen)
         observer.schedule(event_handler, str(source_path), recursive=True)
         handlers.append(event_handler)
     
     # Start monitoring
     observer.start()
     print(f"\nMonitoring {len(source_folders)} folder(s). Press Ctrl+C to stop.")
-    print(f"Type 'debug true' or 'debug false' to toggle debug output.\n")
+    print(f"Type 'reload' to re-read config.json, or 'debug true/false' to toggle debug.\n")
     
     # Start console input listener for runtime commands
     def input_listener():
@@ -621,6 +729,30 @@ def main():
                     for h in handlers:
                         h.debug = False
                     print(f"{Colors.GREEN}Debug mode: Disabled{Colors.RESET}")
+                elif cmd == 'reload':
+                    new_config = load_config()
+                    if new_config is None:
+                        print(f"{Colors.RED}Reload failed — keeping current settings.{Colors.RESET}")
+                    else:
+                        for h in handlers:
+                            h.ignore_extensions = [ext.lower() if ext.startswith('.') else f'.{ext.lower()}' for ext in new_config.get('ignore_extensions', [])]
+                            h.ignore_files_without_extension = new_config.get('ignore_files_without_extension', False)
+                            h.compress_png = new_config.get('compress_png', False)
+                            h.debug = new_config.get('debug', False)
+                            h.parse_filename_paths = new_config.get('parse_filename_paths', False)
+                            h.filename_path_delimiter = new_config.get('filename_path_delimiter', '§')
+                            h.parse_resize_from_filename = new_config.get('parse_resize_from_filename', False)
+                            new_filter = (new_config.get('resize_filter', 'mitchell') or 'mitchell').lower()
+                            if new_filter not in FolderMonitorHandler.VALID_RESIZE_FILTERS:
+                                print(f"{Colors.YELLOW}Warning: Unknown resize_filter '{new_filter}', keeping '{h.resize_filter}'{Colors.RESET}")
+                            else:
+                                h.resize_filter = new_filter
+                            h.resize_sharpen = new_config.get('resize_sharpen', False)
+                            h.skip_compression_prefix_enabled = new_config.get('skip_compression_prefix_enabled', False)
+                            h.skip_compression_prefix = new_config.get('skip_compression_prefix', '!')
+                            h.path_macros = new_config.get('path_macros', {})
+                            h._cooldown = new_config.get('cooldown', 5.0)
+                        print(f"{Colors.GREEN}Config reloaded successfully.{Colors.RESET}")
                 elif cmd:
                     print(f"Unknown command: {cmd}")
             except EOFError:
