@@ -14,6 +14,7 @@ A Python script that monitors specified folders (including subfolders) for file 
 - **File Filtering**: Ignore specific file extensions (supports multi-part extensions like `.bak.png`)
 - **PNG Compression**: Optional high-quality PNG compression using pngquant (90-100% quality)
 - **Skip Compression Prefix**: Selectively disable compression for specific files using a filename prefix
+- **Ignore File Prefix**: Completely skip processing files with a configurable filename prefix (e.g., `[ignore]`)
 - **Image Resizing**: Parse resize percentage from filename (e.g., `50% image.png` resizes to 50%)
 - **Automatic Scale Cleanup**: Automatically deletes old scale variations when saving new ones (e.g., saving `50% file.png` deletes `75% file.png`)
 - **Filename Path Parsing**: Extract subfolder paths from filenames using a delimiter (e.g., `folder§subfolder§file.png`)
@@ -93,6 +94,8 @@ You can type `reload` to script cmd to reload the values from config json. Editi
   "parse_resize_from_filename": true,
   "skip_compression_prefix_enabled": false,
   "skip_compression_prefix": "!",
+  "ignore_prefix_enabled": true,
+  "ignore_prefix": "[ignore]",
   "path_macros": {
     "ui": "C:\\Users\\You\\GameProject\\UI\\cocosstudio"
   },
@@ -120,6 +123,8 @@ You can type `reload` to script cmd to reload the values from config json. Editi
 | `resize_sharpen` | boolean | No | Apply unsharp mask after resize for extra sharpness (default: false) |
 | `skip_compression_prefix_enabled` | boolean | No | Enable skip compression prefix feature (default: false) |
 | `skip_compression_prefix` | string | No | Prefix that disables compression for files (default: "!") |
+| `ignore_prefix_enabled` | boolean | No | Enable ignore file prefix feature (default: false) |
+| `ignore_prefix` | string | No | Prefix that causes files to be completely ignored/skipped (default: "[ignore]") |
 | `path_macros` | object | No | Dictionary of shorthand macros that reroute files to different absolute paths (default: {}) |
 | `pngquant_path` | string | No | Path to pngquant executable (auto-detected if bundled) |
 | `optipng_path` | string | No | Path to optipng executable (auto-detected if bundled) |
@@ -214,6 +219,40 @@ You can use any single character or string as the prefix:
 - The prefix is automatically removed from the destination filename
 - Only affects PNG files (compression is PNG-only)
 - Files without the prefix are processed normally
+
+### Ignore File Prefix
+
+Completely skip processing files by adding a prefix to the filename. Files with this prefix will be ignored by the monitor entirely — they won't be copied, resized, or compressed. This is useful for work-in-progress files or assets you want to keep in the source folder without triggering any processing.
+
+**Configuration:**
+```json
+{
+  "ignore_prefix_enabled": true,
+  "ignore_prefix": "[ignore]"
+}
+```
+
+**Examples**:
+- `[ignore]logo.png` → Completely ignored, not processed
+- `[ignore]draft_character.png` → Completely ignored
+- `logo.png` → Processed normally
+
+**Custom Prefixes:**
+
+You can use any string as the prefix:
+
+```json
+{
+  "ignore_prefix": "WIP_"
+}
+```
+
+- `WIP_texture.png` → Completely ignored
+
+**Notes:**
+- The file is not copied to the destination at all
+- Unlike `skip_compression_prefix`, which only skips compression, this skips all processing
+- The check happens before extension filtering and all other processing steps
 
 ### Image Resizing
 

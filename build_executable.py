@@ -96,6 +96,8 @@ if dist_folder.exists():
             "resize_sharpen": config_data.get("resize_sharpen", False),
             "skip_compression_prefix_enabled": config_data.get("skip_compression_prefix_enabled", True),
             "skip_compression_prefix": config_data.get("skip_compression_prefix", "#"),
+            "ignore_prefix_enabled": config_data.get("ignore_prefix_enabled", True),
+            "ignore_prefix": config_data.get("ignore_prefix", "[ignore]"),
             "path_macros": {
                 "UI": "C:/path/to/your/secondary/destination/folder"
             },

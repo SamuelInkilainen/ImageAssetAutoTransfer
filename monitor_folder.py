@@ -58,7 +58,7 @@ class FolderMonitorHandler(FileSystemEventHandler):
     
     VALID_RESIZE_FILTERS = ['mitchell', 'catrom', 'lanczos']
 
-    def __init__(self, source_path, destination_path, label=None, ignore_extensions=None, ignore_files_without_extension=False, compress_png=False, pngquant_path=None, optipng_path=None, debug=False, parse_filename_paths=False, filename_path_delimiter='§', parse_resize_from_filename=False, skip_compression_prefix_enabled=False, skip_compression_prefix='!', path_macros=None, cooldown=5.0, resize_filter='mitchell', resize_sharpen=False):
+    def __init__(self, source_path, destination_path, label=None, ignore_extensions=None, ignore_files_without_extension=False, compress_png=False, pngquant_path=None, optipng_path=None, debug=False, parse_filename_paths=False, filename_path_delimiter='§', parse_resize_from_filename=False, skip_compression_prefix_enabled=False, skip_compression_prefix='!', path_macros=None, cooldown=5.0, resize_filter='mitchell', resize_sharpen=False, ignore_prefix_enabled=False, ignore_prefix='[ignore]'):
         self.source_path = Path(source_path).resolve()
         self.destination_path = Path(destination_path).resolve()
         self.label = label or str(self.source_path)
@@ -109,6 +109,8 @@ class FolderMonitorHandler(FileSystemEventHandler):
         self.resize_sharpen = resize_sharpen
         self.skip_compression_prefix_enabled = skip_compression_prefix_enabled
         self.skip_compression_prefix = skip_compression_prefix
+        self.ignore_prefix_enabled = ignore_prefix_enabled
+        self.ignore_prefix = ignore_prefix
         self.path_macros = path_macros or {}
         self._debounce_timers = {}  # Per-file debounce timers
         self._debounce_lock = threading.Lock()
@@ -135,6 +137,8 @@ class FolderMonitorHandler(FileSystemEventHandler):
             print(f"  Resize Filter: {self.resize_filter}{sharpen_label}")
         if self.skip_compression_prefix_enabled:
             print(f"  Skip Compression Prefix: Enabled (prefix: '{self.skip_compression_prefix}')")
+        if self.ignore_prefix_enabled:
+            print(f"  Ignore File Prefix: Enabled (prefix: '{self.ignore_prefix}')")
         if self.path_macros:
             print(f"  Path Macros:")
             for macro, expansion in self.path_macros.items():
@@ -168,6 +172,13 @@ class FolderMonitorHandler(FileSystemEventHandler):
             if self.ignore_files_without_extension and not src_file.suffix:
                 if self.debug:
                     log.append(f"  Skipping file without extension")
+                self._flush_log(log)
+                return
+
+            # Check if file has the ignore prefix
+            if self.ignore_prefix_enabled and src_file.name.startswith(self.ignore_prefix):
+                if self.debug:
+                    log.append(f"[DEBUG] Ignoring {src_file.name} (ignore prefix '{self.ignore_prefix}')")
                 self._flush_log(log)
                 return
 
@@ -701,13 +712,15 @@ def main():
     resize_sharpen = config.get('resize_sharpen', False)
     skip_compression_prefix_enabled = config.get('skip_compression_prefix_enabled', False)
     skip_compression_prefix = config.get('skip_compression_prefix', '!')
+    ignore_prefix_enabled = config.get('ignore_prefix_enabled', False)
+    ignore_prefix = config.get('ignore_prefix', '[ignore]')
     path_macros = config.get('path_macros', {})
     cooldown = config.get('cooldown', 5.0)
     handlers = []
     for item in source_folders:
         source_path = Path(item['path'])
         label = item.get('label', None)
-        event_handler = FolderMonitorHandler(source_path, destination_folder, label, ignore_extensions, ignore_files_without_extension, compress_png, pngquant_path, optipng_path, debug, parse_filename_paths, filename_path_delimiter, parse_resize_from_filename, skip_compression_prefix_enabled, skip_compression_prefix, path_macros, cooldown, resize_filter, resize_sharpen)
+        event_handler = FolderMonitorHandler(source_path, destination_folder, label, ignore_extensions, ignore_files_without_extension, compress_png, pngquant_path, optipng_path, debug, parse_filename_paths, filename_path_delimiter, parse_resize_from_filename, skip_compression_prefix_enabled, skip_compression_prefix, path_macros, cooldown, resize_filter, resize_sharpen, ignore_prefix_enabled, ignore_prefix)
         observer.schedule(event_handler, str(source_path), recursive=True)
         handlers.append(event_handler)
     
@@ -750,6 +763,8 @@ def main():
                             h.resize_sharpen = new_config.get('resize_sharpen', False)
                             h.skip_compression_prefix_enabled = new_config.get('skip_compression_prefix_enabled', False)
                             h.skip_compression_prefix = new_config.get('skip_compression_prefix', '!')
+                            h.ignore_prefix_enabled = new_config.get('ignore_prefix_enabled', False)
+                            h.ignore_prefix = new_config.get('ignore_prefix', '[ignore]')
                             h.path_macros = new_config.get('path_macros', {})
                             h._cooldown = new_config.get('cooldown', 5.0)
                         print(f"{Colors.GREEN}Config reloaded successfully.{Colors.RESET}")

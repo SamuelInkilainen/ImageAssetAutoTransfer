@@ -22,5 +22,7 @@
   "resize_sharpen": true,
   "skip_compression_prefix_enabled": true,
   "skip_compression_prefix": "#",
+  "ignore_prefix_enabled": true,
+  "ignore_prefix": "[ignore]",
   "debug": false
 } 
