@@ -80,7 +80,13 @@ class FolderMonitorHandler(FileSystemEventHandler):
                 else:
                     self.pngquant_path = 'pngquant'  # Fall back to PATH
             else:
-                self.pngquant_path = 'pngquant'  # Default to PATH
+                # Check for local pngquant folder next to the script
+                script_dir = Path(__file__).parent
+                local_pngquant = script_dir / 'pngquant' / 'pngquant.exe'
+                if local_pngquant.exists():
+                    self.pngquant_path = str(local_pngquant)
+                else:
+                    self.pngquant_path = 'pngquant'  # Default to PATH
         
         # Auto-detect bundled optipng if running as executable
         if optipng_path:
@@ -96,7 +102,13 @@ class FolderMonitorHandler(FileSystemEventHandler):
                 else:
                     self.optipng_path = 'optipng'  # Fall back to PATH
             else:
-                self.optipng_path = 'optipng'  # Default to PATH
+                # Check for local optipng folder next to the script
+                script_dir = Path(__file__).parent
+                local_optipng = script_dir / 'optipng' / 'optipng.exe'
+                if local_optipng.exists():
+                    self.optipng_path = str(local_optipng)
+                else:
+                    self.optipng_path = 'optipng'  # Default to PATH
         
         self.debug = debug
         self.parse_filename_paths = parse_filename_paths
