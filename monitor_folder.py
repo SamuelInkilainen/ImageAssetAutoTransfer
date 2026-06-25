@@ -225,26 +225,44 @@ class FolderMonitorHandler(FileSystemEventHandler):
 
             # Parse resize percentage from filename if enabled
             if self.parse_resize_from_filename:
-                # Match pattern like "50% " at the start of filename
-                resize_match = re.match(r'^(\d+)%\s+(.+)$', filename)
+                # Match pattern like "50% " or "50%" at the start of filename (space is optional)
+                resize_match = re.match(r'^(\d+)%\s*(.+)$', filename)
                 if resize_match:
                     resize_percentage = int(resize_match.group(1))
                     filename = resize_match.group(2)  # Remove the percentage prefix
+                else:
+                    # No scale prefix — treat as 100% (no resize needed, but still clean up old variations)
+                    resize_percentage = None
 
-                    # Delete old scale variations of the same base filename from source folder
-                    src_dir = src_file.parent
-                    for sibling in src_dir.iterdir():
-                        if sibling == src_file or sibling.is_dir():
-                            continue
-                        sibling_match = re.match(r'^(\d+)%\s+(.+)$', sibling.name)
-                        if sibling_match and sibling_match.group(2) == filename:
-                            try:
-                                sibling.unlink()
-                                log.append(f"  Deleted old variation: {sibling.name}")
-                                if self.debug:
-                                    log.append(f"[DEBUG] Removed old scale variation {sibling_match.group(1)}% from source")
-                            except Exception as e:
-                                log.append(f"{Colors.YELLOW}  Warning: Could not delete old variation {sibling.name}: {e}{Colors.RESET}")
+                # Delete old scale variations of the same base filename from source folder
+                base_name_for_matching = filename
+                src_dir = src_file.parent
+                for sibling in src_dir.iterdir():
+                    if sibling == src_file or sibling.is_dir():
+                        continue
+                    sibling_name = sibling.name
+                    # Strip skip compression prefix if enabled
+                    if self.skip_compression_prefix_enabled and sibling_name.startswith(self.skip_compression_prefix):
+                        sibling_name = sibling_name[len(self.skip_compression_prefix):]
+                    sibling_match = re.match(r'^(\d+)%\s*(.+)$', sibling_name)
+                    if sibling_match and sibling_match.group(2) == base_name_for_matching:
+                        # Sibling has a scale prefix and same base name — delete it
+                        try:
+                            sibling.unlink()
+                            log.append(f"  Deleted old variation: {sibling.name}")
+                            if self.debug:
+                                log.append(f"[DEBUG] Removed old scale variation {sibling_match.group(1)}% from source")
+                        except Exception as e:
+                            log.append(f"{Colors.YELLOW}  Warning: Could not delete old variation {sibling.name}: {e}{Colors.RESET}")
+                    elif sibling_name == base_name_for_matching:
+                        # Sibling has no scale prefix (implicit 100%) and same name — delete it
+                        try:
+                            sibling.unlink()
+                            log.append(f"  Deleted old variation: {sibling.name}")
+                            if self.debug:
+                                log.append(f"[DEBUG] Removed implicit 100% variation from source")
+                        except Exception as e:
+                            log.append(f"{Colors.YELLOW}  Warning: Could not delete old variation {sibling.name}: {e}{Colors.RESET}")
 
             # Parse filename paths if enabled
             if self.parse_filename_paths:
